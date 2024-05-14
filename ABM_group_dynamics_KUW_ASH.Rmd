@@ -1,0 +1,251 @@
+---
+title: "ABM Group Dynamics in CPS"
+author: "Kristiane Uhrenholt Warncke and Anne Skamris Holm"
+date: "2024-05-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix)
+```
+
+## Loading the data 
+```{r}
+group_data <- read_csv("~/Cognitive_Science/fourth_sem/SocialCulturalDynamics/EXAM/ABM_RankingTask_2015_new2 team5game8 (1)-spreadsheet.csv")
+```
+
+
+```{r}
+colnames(group_data)
+```
+
+
+## Grouping the diversity_score into "low, middle, high" 
+Tænker måske det giver mening at gøre det lidt på samme måde?
+```{r}
+group_data$diversity <- cut(group_data$diversity_score, 
+                      breaks = c(-Inf, 2, 5, Inf),
+                      labels = c("low", "medium", "high"))
+
+
+group_data$diversity <- as.factor(group_data$diversity)
+
+```
+
+
+### Counting: 
+```{r}
+ggplot(data = group_data, aes(x = diversity, fill = diversity)) + 
+  geom_histogram(stat = "count") + 
+  theme_bw()
+
+group_data%>% 
+  group_by(diversity) %>% 
+  summarise("count" = n())
+```
+
+
+## Plotting
+### Synergy
+```{r}
+#strong synergy
+ggplot(data = group_data, aes(x = diversity, y = avg_strong_synergy, fill = diversity)) + 
+  labs(title = "Strong Synergy")+
+  geom_violin()
+```
+
+```{r}
+#weak synergy
+ggplot(data = group_data, aes(x = diversity, y = avg_weak_synergy, fill = diversity)) + 
+  labs(title = "Weak Synergy")+
+  geom_violin()
+```
+
+
+### Accuracy 
+```{r}
+#accuracy and diversity
+ggplot(data = group_data, aes(x = diversity, y = avg_accuracy, fill = diversity)) + 
+  labs(title = "Accuracy")+
+  geom_violin()
+```
+
+```{r}
+#accuracy and number of ticks/rounds
+ggplot(data = group_data, aes(x = avg_accuracy, y = avg_n_tick)) + 
+  labs(title = "Accuracy and Number of Ticks")+
+  geom_point(aes(color = diversity)) + 
+  theme_bw()
+```
+
+### Sanity Checks
+```{r}
+consensus <- ggplot(group_data, aes(x=avg_consensus))+
+  geom_density(color="black", fill="#FE6EA3") +
+  theme_bw() +
+  labs(title = "Consensus", y = "Density", x = "Average Consensus") + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16)+
+    guides(fill=FALSE)
+
+weak_synergy <- ggplot(group_data, aes(x=avg_weak_synergy))+
+  geom_density(color="black", fill="#8495FF") +
+  theme_bw() +
+  labs(title = "Weak Synergy", y = "Density", x = "Average Weak Synergy") + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16)+
+    guides(fill=FALSE)
+
+plots <- ggarrange(consensus, weak_synergy)
+plots
+
+ggsave(plots, filename = "consensus_synergy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
+```
+
+
+### H.1.1 (hypotese 1 tror jeg)
+```{r}
+accuracy <- ggplot(data = group_data, aes(x = diversity, y = avg_accuracy, fill = diversity)) + 
+  geom_violin() + 
+  geom_boxplot(width = 0.1, outlier.size=-1) + 
+  scale_y_continuous(labels = scales::percent_format(accuracy=1))+
+  stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
+  guides(fill=FALSE)+
+  scale_fill_manual(name = "diversity", values = c('#40E0D0','#00CCFF', '#EC7063'))+
+  labs(title = "(A) Accuracy", y = "Average Accuracy", x = "Diversity")+
+  scale_x_discrete(labels=  c("Low", "Medium", "High")) + 
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
+
+accuracy
+
+ggsave(accuracy, filename = "accuracy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
+```
+
+
+```{r}
+weak_diversity <- group_data %>%
+  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
+ggplot(aes(x=avg_weak_synergy, fill = diversity))+
+  geom_density(alpha = 0.6) +
+  theme_bw() +
+  labs(title = "Weak Synergy", y = "Density", x = "Average Weak Synergy") + 
+  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
+
+strong_diversity <- group_data %>%
+  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
+ggplot(aes(x=avg_strong_synergy, fill = diversity))+
+  geom_density(alpha = 0.6) +
+  theme_bw() +
+  labs(title = "Strong Synergy", y = "Density", x = "Average Strong Synergy") + 
+  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
+
+synergy_diversity_plots <- ggarrange(weak_diversity, strong_diversity)
+
+#ggsave(synergy_diversity_plots, filename = "synergy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
+```
+
+
+```{r}
+synergy_data <- group_data %>% 
+  mutate(diversity = factor(diversity, levels = c("high", "medium", "low")))
+
+
+synergy <- ggplot(synergy_data, aes(x=avg_strong_synergy, y=avg_weak_synergy, color = diversity))+
+  geom_point(size = 1)+
+  scale_color_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
+  theme_bw()+
+  labs(y = "Average Weak Synergy", x = "Average Strong Synergy") + 
+  theme(text=element_text(family = "Times New Roman"))
+
+  
+synergy_dists <- ggMarginal(synergy, groupFill = TRUE, size = 2, alpha = 0.6)
+
+synergy_dists
+
+#ggsave(synergy_dists, filename = "synergy_distributions_scatter.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
+```
+
+
+### H.1.2 (hypotese 2)
+```{r}
+consensus_diversity <- group_data %>%
+  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
+ggplot(aes(x=avg_consensus, fill = diversity))+
+  geom_density(alpha = 0.6) +
+  theme_bw() +
+  labs(title = "(A) Consensus", y = "Density", x = "Average Consensus") + 
+  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
+
+ggsave(consensus_diversity, filename = "consensus_diversity.jpeg", dpi = 300, type = "cairo", width = 5, height = 5, units = "in")
+
+```
+
+
+```{r}
+mean_data <- group_data %>% 
+  group_by(diversity) %>% 
+  summarise(mean_avg_n_tick = mean(avg_n_tick), sd_mean_avg_n_tick = std.error(avg_n_tick))
+
+ticks_plot <- ggplot(data = mean_data, aes(x = diversity, y = mean_avg_n_tick, color = diversity, ymin = (mean_avg_n_tick - 2*sd_mean_avg_n_tick), ymax = (mean_avg_n_tick + 2*sd_mean_avg_n_tick))) +
+  geom_errorbar(width = 0.5, size = 1.5)+
+  ylim(6, 8) + 
+  geom_point(size = 3, shape = 18, color = "black") +
+  scale_color_manual(name = "diversity", values = c('#40E0D0','#00CCFF', '#EC7063'), labels=  c("Low", "Medium", "High"))+
+  labs(title = "(B) Discussion Rounds", y = "Average Number of Discussion Rounds", x = "Diversity")+
+  scale_x_discrete(labels=  c("Low", "Medium", "High"))+
+  coord_equal(ratio = 2)+
+  guides(color=FALSE)+
+  theme_bw() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
+
+ticks_plot
+
+ggsave(ticks_plot, filename = "ticks_plot.jpeg", dpi = 300, type = "cairo", width = 4, height = 5, units = "in")
+```
+
+
+## STATS 
+
+### H.1.1 Synergy and Accuracy 
+```{r}
+## accuracy model ## 
+accuracy_model <- lm(avg_accuracy ~ diversity, data = group_data)
+summary(accuracy_model)
+```
+
+```{r}
+## synergy models ## 
+weak_synergy_model <- lm(avg_weak_synergy ~ diversity, data = group_data)
+summary(weak_synergy_model)
+
+strong_synergy_model <- lm(avg_strong_synergy ~ diversity, data = group_data)
+summary(strong_synergy_model)
+```
+
+
+### H.1.2
+For the second, hypothesis, the data is releveled to a different baseline 
+```{r}
+relevel_group <- group_data %>%
+  mutate(diversity = factor(diversity, levels = c("high", "medium", "low")))
+```
+
+
+```{r}
+## ticks model ## 
+ticks_model <- lm(avg_n_tick ~ diversity, data = relevel_group)
+summary(ticks_model)
+```
+
+```{r}
+## consensus model ## 
+consensus_model <- lm(avg_consensus ~ diversity, data = relevel_group)
+summary(consensus_model)
+```
