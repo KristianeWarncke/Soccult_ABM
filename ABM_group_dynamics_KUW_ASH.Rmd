@@ -11,222 +11,738 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
-pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix)
+pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix, dplyr, ggplot2, stringr, tidyr, gridExtra, grid, purrr, lme4)
 ```
 
 ## Loading the data 
 ```{r}
-group_data <- read_csv("~/Cognitive_Science/fourth_sem/SocialCulturalDynamics/EXAM/ABM_RankingTask_2015_new2 team5game8 (1)-spreadsheet.csv")
+group_data_all <- read.csv2("~/Cognitive_Science/fourth_sem/SocialCulturalDynamics/EXAM/Soccult_ABM/abm-cps-master/ABM_RankingTask_2015_FINAL_own_abm-table_10000.csv")
 ```
 
 
 ```{r}
-colnames(group_data)
+colnames(group_data_all)
+```
+### PREPROCESSING
+
+```{r}
+#Renaming columns 
+group_data_all <- rename(group_data_all, 
+                     round = X.run.number., 
+                     team_size = team_size, 
+                     game_size = game_size,
+                     knowledge_sharing = knowledge_sharing,
+                     n_steps = X.step.,
+                     team_score = team_score,
+                     gain_score = gain_score,
+                     synergy_score = synergy_score,
+                     agent_names = agent_names,
+                     reached_consensus = reached_consensus.,
+                     agents_agreeableness = X.agreeableness..of.turtles,
+                     agents_talkativeness = X.talkativeness..of.turtles,
+                     agents_neuroticism = X.neuroticism..of.turtles,
+                     agents_critical = X.critical_thinking..of.turtles,
+                     agents_knowledge = X.knowledge..of.turtles,)
 ```
 
+## Converting string vectors to numeric vectors in certain columns
+```{r}
+# Helper function to convert string vectors to numeric vectors
+convert_to_numeric_vector <- function(x) {
+  # Remove unwanted characters
+  cleaned <- gsub("\\[|\\]|\"", "", x)
+  # Split the string by spaces and convert to numeric
+  as.numeric(unlist(strsplit(cleaned, " ")))
+}
 
-## Grouping the diversity_score into "low, middle, high" 
+# Apply this conversion to each agents_ column
+group_data_all <- group_data_all %>%
+  mutate(across(starts_with("agents_"), ~map(.x, convert_to_numeric_vector)))
+
+# ..and to the synergy score
+group_data_all <- group_data_all %>%
+  mutate(across("synergy_score", ~map(.x, convert_to_numeric_vector)))
+
+# and team score
+group_data_all <- group_data_all %>%
+  mutate(across("team_score", ~map(.x, convert_to_numeric_vector)))
+
+# and gain score
+group_data_all <- group_data_all %>%
+  mutate(across("gain_score", ~map(.x, convert_to_numeric_vector)))
+
+
+```
+
+```{r}
+# view some of the converted data
+print(head(group_data_all$agents_agreeableness))
+```
+
+## Grouping the diversity_score into levels from 1-6 depending on team size 
 Tænker måske det giver mening at gøre det lidt på samme måde?
 ```{r}
-group_data$diversity <- cut(group_data$diversity_score, 
-                      breaks = c(-Inf, 2, 5, Inf),
-                      labels = c("low", "medium", "high"))
-
-
-group_data$diversity <- as.factor(group_data$diversity)
+# Calculate diversity level
+group_data_all <- group_data_all %>%
+  mutate(
+    agent_names_cleaned = str_extract_all(agent_names, "\\b\\w+_agent\\b"), # Extract agent types
+    diversity_level = map_int(agent_names_cleaned, ~length(unique(.x))) # Count unique agent types
+  )
 
 ```
 
-
-### Counting: 
+## Convert to right classes
 ```{r}
-ggplot(data = group_data, aes(x = diversity, fill = diversity)) + 
+#Removing NA's
+group_data_all <- group_data_all %>%
+  drop_na()
+
+#Re-classifying all other column variables
+group_data_all <- group_data_all %>%
+  mutate(
+    round = as.integer(round),
+    team_size = as.integer(team_size),
+    game_size = as.integer(game_size),
+    knowledge_sharing = as.numeric(knowledge_sharing),
+    n_steps = as.numeric(n_steps),
+    team_score = as.numeric(team_score),
+    gain_score = as.numeric(gain_score),
+    synergy_score = as.numeric(synergy_score),
+    agent_names = as.character(agent_names),  # names are to be treated as text
+    agent_names_cleaned = as.character(agent_names),
+    reached_consensus = as.logical(reached_consensus),  # this is a TRUE/FALSE column
+    diversity_level = as.factor(diversity_level)
+  )
+
+```
+
+```{r}
+#Remove gain scores above 5 (because we saw that there were mistakes in the data)
+# or phrased differently, Filtering rows where gain_score is not above 5
+group_data_all <- group_data_all %>%
+  filter(gain_score <= 5)
+```
+
+
+#Reshaping 
+```{r}
+## Convert string representations of lists to numeric lists
+group_data_all <- group_data_all %>%
+  mutate(across(starts_with("agents_"), ~map(.x, ~{
+    # Split the string by commas, remove non-numeric characters, convert to numeric
+    as.numeric(unlist(strsplit(gsub("[c\\(\\)\\[\\]\\s']", "", .x), ",")))
+  })))
+
+## Adjust the group_data_all dataset to include individual columns for each agent's trait
+group_data_all <- group_data_all %>%
+  mutate(row_id = row_number()) %>%
+  rowwise() %>%  # Operate on each row individually to avoid size mismatch issues
+  mutate(
+    agents_agreeableness_agent1 = list(agents_agreeableness[1]),
+    agents_agreeableness_agent2 = list(agents_agreeableness[2]),
+    agents_agreeableness_agent3 = list(agents_agreeableness[3]),
+    agents_agreeableness_agent4 = list(agents_agreeableness[4]),
+    agents_agreeableness_agent5 = list(agents_agreeableness[5]),
+    agents_talkativeness_agent1 = list(agents_talkativeness[1]),
+    agents_talkativeness_agent2 = list(agents_talkativeness[2]),
+    agents_talkativeness_agent3 = list(agents_talkativeness[3]),
+    agents_talkativeness_agent4 = list(agents_talkativeness[4]),
+    agents_talkativeness_agent5 = list(agents_talkativeness[5]),
+    agents_neuroticism_agent1 = list(agents_neuroticism[1]),
+    agents_neuroticism_agent2 = list(agents_neuroticism[2]),
+    agents_neuroticism_agent3 = list(agents_neuroticism[3]),
+    agents_neuroticism_agent4 = list(agents_neuroticism[4]),
+    agents_neuroticism_agent5 = list(agents_neuroticism[5]),
+    agents_critical_agent1 = list(agents_critical[1]),
+    agents_critical_agent2 = list(agents_critical[2]),
+    agents_critical_agent3 = list(agents_critical[3]),
+    agents_critical_agent4 = list(agents_critical[4]),
+    agents_critical_agent5 = list(agents_critical[5]),
+    agents_knowledge_agent1 = list(agents_knowledge[1]),
+    agents_knowledge_agent2 = list(agents_knowledge[2]),
+    agents_knowledge_agent3 = list(agents_knowledge[3]),
+    agents_knowledge_agent4 = list(agents_knowledge[4]),
+    agents_knowledge_agent5 = list(agents_knowledge[5])
+  ) %>%
+  ungroup()
+
+# remove the original 'agents_' columns
+group_data_all <- group_data_all %>%
+  select(-agents_agreeableness, -agents_talkativeness, -agents_neuroticism, -agents_critical, -agents_knowledge)
+
+## Make df with only the trait columns and row number 
+group_data_traits <- group_data_all %>%
+  select(starts_with("agents_"), row_id)
+
+
+# ## Now, pivot the data wider in the traits df using the correct identifiers
+# long_data <- group_data_traits %>%
+#   pivot_longer(
+#     cols = -row_id, 
+#     names_to = "trait_agent", 
+#     values_to = "value"
+#   ) %>%
+#   separate(trait_agent, into = c("trait", "agent"), sep = "_agent") %>%
+#   unite("new_col", agent, trait, sep = "_")  # Ensure agent is first to group by agent
+
+
+## Combine agent traits in columns
+data_traits_combined <- group_data_traits %>%
+  rowwise() %>%  # Operate by row to handle any potential NA properly
+  mutate(
+    agent1 = paste(na.omit(c(agents_agreeableness_agent1, agents_talkativeness_agent1, agents_neuroticism_agent1, agents_critical_agent1, agents_knowledge_agent1)), collapse = ", "),
+    agent2 = paste(na.omit(c(agents_agreeableness_agent2, agents_talkativeness_agent2, agents_neuroticism_agent2, agents_critical_agent2, agents_knowledge_agent2)), collapse = ", "),
+    agent3 = paste(na.omit(c(agents_agreeableness_agent3, agents_talkativeness_agent3, agents_neuroticism_agent3, agents_critical_agent3, agents_knowledge_agent3)), collapse = ", "),
+    agent4 = paste(na.omit(c(agents_agreeableness_agent4, agents_talkativeness_agent4, agents_neuroticism_agent4, agents_critical_agent4, agents_knowledge_agent4)), collapse = ", "),
+    agent5 = paste(na.omit(c(agents_agreeableness_agent5, agents_talkativeness_agent5, agents_neuroticism_agent5, agents_critical_agent5, agents_knowledge_agent5)), collapse = ", ")
+  ) %>% 
+  select(agent1, agent2, agent3, agent4, agent5, row_id)
+
+
+#STEP5 - merge back with other variables for both wide and short format
+# get group_data4 to include all other variables than the ones with agents
+group_data_all <- group_data_all %>%
+  select(round, team_size, game_size, knowledge_sharing, n_steps, team_score, gain_score, synergy_score, agent_names_cleaned, reached_consensus, diversity_level, row_id)
+
+group_data_short <- right_join(data_traits_combined, group_data_all, by = "row_id")
+group_data_wide <- right_join(group_data_traits, group_data_all, by = "row_id")
+
+
+```
+
+FRA NU AF ARBEJDER JEG KUN VIDERE MED TEAMSIZE 5 OG KNOWLEDGE SHARING 0.8
+DET ER DATAFRAMES:
+- group_data_short
+- group_data_wide
+
+### Make dataframe for visually inspecting dominating trait values
+
+```{r}
+
+###########Agreeableness dominant df############
+
+# First, create a single list column in the dataframe where each entry is a list of 
+# all agreeableness values for that row which are greater than 1
+dominating_traits <- group_data_wide %>%
+  mutate(
+    agreeableness_dominant = pmap(list(agents_agreeableness_agent1,
+                                       agents_agreeableness_agent2,
+                                       agents_agreeableness_agent3,
+                                       agents_agreeableness_agent4,
+                                       agents_agreeableness_agent5),
+                                  ~ na.omit(c(ifelse(..1 > 1, ..1, NA),
+                                              ifelse(..2 > 1, ..2, NA),
+                                              ifelse(..3 > 1, ..3, NA),
+                                              ifelse(..4 > 1, ..4, NA),
+                                              ifelse(..5 > 1, ..5, NA))))
+  ) %>%
+  # Filter rows to keep only those where the list is not empty
+  filter(lengths(agreeableness_dominant) > 0) %>%
+  select(agreeableness_dominant)
+
+# To extract all values into a single list
+all_agreeableness_values <- unlist(dominating_traits$agreeableness_dominant)
+
+# Optionally, create a new data frame where these values are stored in a single column
+agreeableness_df <- data.frame(agreeableness = all_agreeableness_values)
+
+#add id column
+agreeableness_df <- agreeableness_df %>%
+  mutate(row_id = row_number())
+
+
+#######Talkativeness dominant df##########
+dominating_traits2 <- group_data_wide %>%
+  mutate(
+    talkativeness_dominant = pmap(list(agents_talkativeness_agent1,
+                                       agents_talkativeness_agent2,
+                                       agents_talkativeness_agent3,
+                                       agents_talkativeness_agent4,
+                                       agents_talkativeness_agent5),
+                                  ~ na.omit(c(ifelse(..1 > 1, ..1, NA),
+                                              ifelse(..2 > 1, ..2, NA),
+                                              ifelse(..3 > 1, ..3, NA),
+                                              ifelse(..4 > 1, ..4, NA),
+                                              ifelse(..5 > 1, ..5, NA))))
+  ) %>%
+  # Filter rows to keep only those where the list is not empty
+  filter(lengths(talkativeness_dominant) > 0) %>%
+  select(talkativeness_dominant)
+
+# To extract all values into a single list
+all_talkativeness_values <- unlist(dominating_traits2$talkativeness_dominant)
+
+# Optionally, create a new data frame where these values are stored in a single column
+talkativeness_df <- data.frame(talkativeness = all_talkativeness_values)
+
+#add id column
+talkativeness_df <- talkativeness_df %>%
+  mutate(row_id = row_number())
+
+
+##########Neurotocism dominant df################
+dominating_traits3 <- group_data_wide %>%
+  mutate(
+    neuroticism_dominant = pmap(list(agents_neuroticism_agent1,
+                                       agents_neuroticism_agent2,
+                                       agents_neuroticism_agent3,
+                                       agents_neuroticism_agent4,
+                                       agents_neuroticism_agent5),
+                                  ~ na.omit(c(ifelse(..1 > 1, ..1, NA),
+                                              ifelse(..2 > 1, ..2, NA),
+                                              ifelse(..3 > 1, ..3, NA),
+                                              ifelse(..4 > 1, ..4, NA),
+                                              ifelse(..5 > 1, ..5, NA))))
+  ) %>%
+  # Filter rows to keep only those where the list is not empty
+  filter(lengths(neuroticism_dominant) > 0) %>%
+  select(neuroticism_dominant)
+
+# To extract all values into a single list
+all_neuroticism_values <- unlist(dominating_traits3$neuroticism_dominant)
+
+# Optionally, create a new data frame where these values are stored in a single column
+neuroticism_df <- data.frame(neuroticism = all_neuroticism_values)
+
+#add id column
+neuroticism_df <- neuroticism_df %>%
+  mutate(row_id = row_number())
+
+# Print the final data frame
+head(neuroticism_df)
+
+#########Critical dominant df############
+dominating_traits4 <- group_data_wide %>%
+  mutate(
+    critical_dominant = pmap(list(agents_critical_agent1,
+                                       agents_critical_agent2,
+                                       agents_critical_agent3,
+                                       agents_critical_agent4,
+                                       agents_critical_agent5),
+                                  ~ na.omit(c(ifelse(..1 > 0, ..1, NA),
+                                              ifelse(..2 > 0, ..2, NA),
+                                              ifelse(..3 > 0, ..3, NA),
+                                              ifelse(..4 > 0, ..4, NA),
+                                              ifelse(..5 > 0, ..5, NA))))
+  ) %>%
+  # Filter rows to keep only those where the list is not empty
+  filter(lengths(critical_dominant) > 0) %>%
+  select(critical_dominant)
+
+# To extract all values into a single list
+all_critical_values <- unlist(dominating_traits4$critical_dominant)
+
+# Optionally, create a new data frame where these values are stored in a single column
+critical_df <- data.frame(critical = all_critical_values)
+
+#add id column
+critical_df <- critical_df %>%
+  mutate(row_id = row_number())
+
+# Print the final data frame
+head(critical_df)
+
+###########Knowledge dominant df#########
+dominating_traits5 <- group_data_wide %>%
+  mutate(
+    knowledge_dominant = pmap(list(agents_knowledge_agent1,
+                                       agents_knowledge_agent2,
+                                       agents_knowledge_agent3,
+                                       agents_knowledge_agent4,
+                                       agents_knowledge_agent5),
+                                  ~ na.omit(c(ifelse(..1 > 0.2, ..1, NA),
+                                              ifelse(..2 > 0.2, ..2, NA),
+                                              ifelse(..3 > 0.2, ..3, NA),
+                                              ifelse(..4 > 0.2, ..4, NA),
+                                              ifelse(..5 > 0.2, ..5, NA))))
+  ) %>%
+  # Filter rows to keep only those where the list is not empty
+  filter(lengths(knowledge_dominant) > 0) %>%
+  select(knowledge_dominant)
+
+# To extract all values into a single list
+all_knowledge_values <- unlist(dominating_traits5$knowledge_dominant)
+
+# Optionally, create a new data frame where these values are stored in a single column
+knowledge_df <- data.frame(knowledge = all_knowledge_values)
+
+#add id column
+knowledge_df <- knowledge_df %>%
+  mutate(row_id = row_number())
+
+# Print the final data frame
+head(critical_df)
+
+
+```
+```{r}
+#combine all 5 dataframes into one with all traits
+dominating_traits <- full_join(agreeableness_df, talkativeness_df, by = "row_id")
+dominating_traits <- full_join(dominating_traits, neuroticism_df, by = "row_id")
+dominating_traits <- full_join(dominating_traits, critical_df, by = "row_id")
+dominating_traits <- full_join(dominating_traits, knowledge_df, by = "row_id")
+
+head(dominating_traits)
+```
+```{r}
+#standardize
+dominating_traits_standardized <- dominating_traits %>%
+  mutate(
+    agreeableness_standardized = scale(agreeableness),
+    talkativeness_standardized = scale(talkativeness),
+    neuroticism_standardized = scale(neuroticism),
+    critical_standardized = scale(critical),
+    knowledge_standardized = scale(knowledge)
+  )%>%
+  select(agreeableness_standardized, talkativeness_standardized, neuroticism_standardized, critical_standardized, knowledge_standardized, row_id)
+
+###convert to numeric
+# Columns to convert
+cols_to_convert <- c("talkativeness_standardized", "neuroticism_standardized", "critical_standardized", "knowledge_standardized", "agreeableness_standardized")
+
+# Convert each matrix in the selected columns to a numeric vector
+dominating_traits_standardized[cols_to_convert] <- lapply(dominating_traits_standardized[cols_to_convert], function(x) apply(x, 1, function(y) as.numeric(y)))
+
+# Check the structure to ensure the conversion
+str(dominating_traits_standardized)
+
+    
+```
+
+# Data visualization
+
+```{r}
+#Team, gain and synergy plots
+synergyscore_plot <- ggplot(group_data_wide, aes(x = synergy_score)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  theme_minimal() +
+  labs(title = "Distribution of Group Performance on the three score-types", x = "Synergy Score", y = "Frequency")
+
+teamscore_plot <- ggplot(group_data_wide, aes(x = team_score)) +
+  geom_histogram(bins = 30, fill = "lightgreen", color = "black") +
+  theme_minimal() +
+  labs(title = "", x = "Team Score", y = "")
+
+gainscore_plot <- ggplot(group_data_wide, aes(x = gain_score)) +
+  geom_histogram(bins = 30, fill = "lightpink", color = "black") +
+  theme_minimal() +
+  labs(title = "", x = "Gain score", y = "")
+
+grid.arrange(synergyscore_plot, teamscore_plot, gainscore_plot, ncol=3)
+
+
+```
+
+```{r}
+#Diversity level plot
+ggplot(data = group_data_short, aes(x = diversity_level, fill = diversity_level)) + 
   geom_histogram(stat = "count") + 
+  labs(title = "Distribution of Diversity Levels", x = "Diversity Level", y = "Count") +
+  scale_fill_brewer(palette = "Paired") +
   theme_bw()
 
-group_data%>% 
-  group_by(diversity) %>% 
+group_data_short%>% 
+  group_by(diversity_level) %>% 
   summarise("count" = n())
 ```
 
 
-## Plotting
-### Synergy
 ```{r}
-#strong synergy
-ggplot(data = group_data, aes(x = diversity, y = avg_strong_synergy, fill = diversity)) + 
-  labs(title = "Strong Synergy")+
+#distribution of agents
+counts <- sapply(dominating_traits, function(x) sum(!is.na(x)))
+print(counts)
+```
+```{r}
+#Visualizing counts
+# Calculating non-NA counts and convert to dataframe for ggplot
+counts_df <- dominating_traits %>%
+  summarise(across(everything(), ~sum(!is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "Column", values_to = "Count")%>%
+  filter(Column != "row_id")
+
+# Create a bar plot using ggplot
+ggplot(counts_df, aes(x = Column, y = Count, fill = Column)) +
+  geom_col() +  # geom_col is used for bar plots with predefined counts
+  theme_minimal() +
+  labs(title = "Agents per dominating trait", x = "Trait", y = "Count") +
+  scale_fill_brewer(palette = "Paired")  # Optional: add color
+```
+
+
+### density plots....
+
+```{r}
+#long data to make density plots across traits
+long_data <- dominating_traits_standardized %>%
+  pivot_longer(
+    cols = c("talkativeness_standardized", "neuroticism_standardized", "critical_standardized", "knowledge_standardized", "agreeableness_standardized"),
+    names_to = "trait",
+    values_to = "value"
+  ) %>%
+  drop_na(value)
+
+density_plot_combined <- ggplot(long_data, aes(x = value, fill = trait, color = trait)) +
+  geom_density(alpha = 0.7) +  # Adding transparency to see overlapping areas
+  scale_fill_brewer(palette = "Paired") +  # This sets distinct colors for each trait
+  scale_color_brewer(palette = "Paired") +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Scaled Dominating Traits",
+    x = "Trait Value",
+    y = "Density"
+  ) +
+  scale_x_continuous(limits = c(-4, 6)) +
+  theme(legend.title = element_blank())  # Optionally remove the legend title
+
+density_plot_combined
+```
+
+```{r}
+ggplot(long_data, aes(x = trait, y = value, fill = trait)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set3") +  # Using a color palette for distinction
+  theme_minimal() +
+  labs(title = "Boxplots of Trait Values", x = "Trait", y = "Value") +
+  scale_y_continuous(limits = c(-2, 7)) +
+  theme(legend.position = "none")  # Optional: remove the legend if not needed
+```
+```{r}
+percentage_consensus <- sum(group_data_short$reached_consensus) / nrow(group_data_short) * 100
+
+# Print the result
+print(paste("Percentage of teams that reached consensus:", percentage_consensus, "%"))
+
+
+```
+
+```{r}
+#Calculating average synergy, team and gain scores
+average_synergy_score <- mean(group_data_wide$synergy_score)
+average_team_score <- mean(group_data_wide$team_score)
+average_gain_score <- mean(group_data_wide$gain_score)
+
+# Print the result
+print(paste("Average synergy score:", average_synergy_score))
+print(paste("Average team score:", average_team_score))
+print(paste("Average gain score:", average_gain_score))
+
+```
+```{r}
+mean_agreeableness <- mean(dominating_traits$agreeableness, na.rm = TRUE)
+mean_talkativeness <- mean(dominating_traits$talkativeness, na.rm = TRUE)
+mean_neuroticism <- mean(dominating_traits$neuroticism, na.rm = TRUE)
+mean_critical <- mean(dominating_traits$critical, na.rm = TRUE)
+mean_knowledge <- mean(dominating_traits$knowledge, na.rm = TRUE)
+
+# Print the results
+print(paste("Average Agreeableness:", mean_agreeableness))
+print(paste("Average Talkativeness:", mean_talkativeness))
+print(paste("Average Neuroticism:", mean_neuroticism))
+print(paste("Average Critical:", mean_critical))
+print(paste("Average Knowledge:", mean_knowledge))
+```
+
+
+# ANALYSIS
+
+##Plotting scores vs diversity
+```{r}
+#synergy
+ggplot(data = group_data_wide, aes(x = diversity_level, y = synergy_score, fill = diversity_level)) + 
+  labs(title = "Synergy and Diversity Level")+
   geom_violin()
-```
 
-```{r}
-#weak synergy
-ggplot(data = group_data, aes(x = diversity, y = avg_weak_synergy, fill = diversity)) + 
-  labs(title = "Weak Synergy")+
-  geom_violin()
-```
-
-
-### Accuracy 
-```{r}
-#accuracy and diversity
-ggplot(data = group_data, aes(x = diversity, y = avg_accuracy, fill = diversity)) + 
-  labs(title = "Accuracy")+
-  geom_violin()
-```
-
-```{r}
-#accuracy and number of ticks/rounds
-ggplot(data = group_data, aes(x = avg_accuracy, y = avg_n_tick)) + 
-  labs(title = "Accuracy and Number of Ticks")+
-  geom_point(aes(color = diversity)) + 
-  theme_bw()
-```
-
-### Sanity Checks
-```{r}
-consensus <- ggplot(group_data, aes(x=avg_consensus))+
-  geom_density(color="black", fill="#FE6EA3") +
-  theme_bw() +
-  labs(title = "Consensus", y = "Density", x = "Average Consensus") + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16)+
-    guides(fill=FALSE)
-
-weak_synergy <- ggplot(group_data, aes(x=avg_weak_synergy))+
-  geom_density(color="black", fill="#8495FF") +
-  theme_bw() +
-  labs(title = "Weak Synergy", y = "Density", x = "Average Weak Synergy") + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16)+
-    guides(fill=FALSE)
-
-plots <- ggarrange(consensus, weak_synergy)
-plots
-
-ggsave(plots, filename = "consensus_synergy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-### H.1.1 (hypotese 1 tror jeg)
-```{r}
-accuracy <- ggplot(data = group_data, aes(x = diversity, y = avg_accuracy, fill = diversity)) + 
+#team score
+team_diversity_plot <- ggplot(data = group_data_wide, aes(x = diversity_level, y = team_score, fill = diversity_level)) + 
   geom_violin() + 
   geom_boxplot(width = 0.1, outlier.size=-1) + 
   scale_y_continuous(labels = scales::percent_format(accuracy=1))+
   stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
   guides(fill=FALSE)+
-  scale_fill_manual(name = "diversity", values = c('#40E0D0','#00CCFF', '#EC7063'))+
-  labs(title = "(A) Accuracy", y = "Average Accuracy", x = "Diversity")+
-  scale_x_discrete(labels=  c("Low", "Medium", "High")) + 
+  #scale_fill_manual(name = "diversity level", palette = "Paired")+
+  labs(title = "Team Score across Diversity Level", y = "Average Team Score", x = "Diversity")+
+  #scale_x_discrete(labels=  c("Low", "Medium", "High")) + 
   theme_bw()+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
-
-accuracy
-
-ggsave(accuracy, filename = "accuracy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-```{r}
-weak_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_weak_synergy, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "Weak Synergy", y = "Density", x = "Average Weak Synergy") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
 
-strong_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_strong_synergy, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "Strong Synergy", y = "Density", x = "Average Strong Synergy") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
+
+#gain score
+gain__diversity_plot <- ggplot(data = group_data_wide, aes(x = diversity_level, y = gain_score, fill = diversity_level)) + 
+  geom_violin() + 
+  geom_boxplot(width = 0.1, outlier.size=-1) + 
+  scale_y_continuous(labels = scales::percent_format(accuracy=1))+
+  stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
+  guides(fill=FALSE)+
+  #scale_fill_manual(name = "diversity level", palette = "Paired")+
+  labs(title = "Gain Score across Diversity Level", y = "Average Team Score", x = "Diversity")+
+  theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
 
-synergy_diversity_plots <- ggarrange(weak_diversity, strong_diversity)
+team_diversity_plot
+gain__diversity_plot
 
-#ggsave(synergy_diversity_plots, filename = "synergy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-```{r}
-synergy_data <- group_data %>% 
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low")))
-
-
-synergy <- ggplot(synergy_data, aes(x=avg_strong_synergy, y=avg_weak_synergy, color = diversity))+
-  geom_point(size = 1)+
-  scale_color_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
-  theme_bw()+
-  labs(y = "Average Weak Synergy", x = "Average Strong Synergy") + 
-  theme(text=element_text(family = "Times New Roman"))
-
-  
-synergy_dists <- ggMarginal(synergy, groupFill = TRUE, size = 2, alpha = 0.6)
-
-synergy_dists
-
-#ggsave(synergy_dists, filename = "synergy_distributions_scatter.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-### H.1.2 (hypotese 2)
-```{r}
-consensus_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_consensus, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "(A) Consensus", y = "Density", x = "Average Consensus") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
-
-ggsave(consensus_diversity, filename = "consensus_diversity.jpeg", dpi = 300, type = "cairo", width = 5, height = 5, units = "in")
 
 ```
-
-
 ```{r}
-mean_data <- group_data %>% 
-  group_by(diversity) %>% 
-  summarise(mean_avg_n_tick = mean(avg_n_tick), sd_mean_avg_n_tick = std.error(avg_n_tick))
+#in order to make next plot, calculate avg and sd steps 
+average_steps_per_diversity <- group_data_wide %>%
+  group_by(diversity_level) %>%
+  summarise(avg_steps_diversity = mean(n_steps, na.rm = TRUE), .groups = 'drop')
 
-ticks_plot <- ggplot(data = mean_data, aes(x = diversity, y = mean_avg_n_tick, color = diversity, ymin = (mean_avg_n_tick - 2*sd_mean_avg_n_tick), ymax = (mean_avg_n_tick + 2*sd_mean_avg_n_tick))) +
+sd_average_steps_per_diversity <- group_data_wide %>%
+  group_by(diversity_level) %>%
+  summarise(sd_avg_steps_diversity = sd(avg_n_steps, na.rm = TRUE), .groups = 'drop')
+
+# Join average steps back to the original dataframe
+group_data_wide <- group_data_wide %>%
+  left_join(average_steps_per_diversity, by = "diversity_level")
+
+# Join standard deviation of steps back to the original dataframe
+group_data_wide <- group_data_wide %>%
+  left_join(sd_average_steps_per_diversity, by = "diversity_level")
+
+mean_data <- group_data_wide %>% 
+  group_by(diversity_level) %>% 
+  summarise(mean_avg_n_steps = mean(avg_n_steps), sd_mean_avg_n_steps = std.error(avg_n_steps))
+```
+
+LOL det dårligt....
+```{r}
+
+#tics and diversity
+ticks_diversity_plot <- ggplot(data = mean_data, aes(x = diversity_level, y = mean_avg_n_steps, color = diversity_level, ymin = (mean_avg_n_steps - 2*sd_mean_avg_n_steps), ymax = (mean_avg_n_steps + 2*sd_mean_avg_n_steps))) +
   geom_errorbar(width = 0.5, size = 1.5)+
-  ylim(6, 8) + 
+  ylim(17, 18) + 
   geom_point(size = 3, shape = 18, color = "black") +
-  scale_color_manual(name = "diversity", values = c('#40E0D0','#00CCFF', '#EC7063'), labels=  c("Low", "Medium", "High"))+
-  labs(title = "(B) Discussion Rounds", y = "Average Number of Discussion Rounds", x = "Diversity")+
-  scale_x_discrete(labels=  c("Low", "Medium", "High"))+
-  coord_equal(ratio = 2)+
+  labs(title = "Discussion Rounds", y = "Average Number of Discussion Rounds", x = "Diversity")+
+    coord_equal(ratio = 2)+
   guides(color=FALSE)+
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
+  theme_bw()
+  #theme(plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
 
-ticks_plot
+ticks_diversity_plot
 
-ggsave(ticks_plot, filename = "ticks_plot.jpeg", dpi = 300, type = "cairo", width = 4, height = 5, units = "in")
+group_data_wide <- group_data_wide %>%
+  mutate(n_steps = as.numeric(n_steps))
+
+#ggsave(ticks_plot, filename = "ticks_plot.jpeg", dpi = 300, width = 4, height = 5, units= "in")
+
+```
+
+
+```{r}
+ticks__diversity_plot <- ggplot(data = group_data_wide, aes(x = diversity_level, y = n_steps, color = diversity_level)) +
+  geom_boxplot() +
+  labs(title = "Discussion Rounds across Diversity Levels", y = "Number of Discussion Rounds", x = "Diversity") +
+  theme_bw()
+
+# Display the plot
+ticks__diversity_plot
+```
+
+```{r}
+#accuracy and number of ticks/rounds
+ggplot(data = group_data_wide, aes(x = team_score, y = n_steps)) + 
+  labs(title = "Team score and Number of Discussion Rounds")+
+  geom_point(aes(color = diversity_level)) + 
+  theme_bw()
+```
+
+
+##Correlation plot
+
+##H2.7: Gain scores and synergy scores are correlated
+```{r}
+library(corrplot)
+# Assuming you've calculated correlations and stored in M
+M <- cor(group_data_wide[c("synergy_score", "team_score")])
+corrplot(M, method = "circle")
+
+
+#"avg_talkativeness", "avg_neuroticism", "avg_critical", "avg_knowledge", "avg_agreeableness"
 ```
 
 
 ## STATS 
 
-### H.1.1 Synergy and Accuracy 
+In order to make linear models of the data I have to make a dataframe that contains:
+- average trait score per group per trait
+
 ```{r}
-## accuracy model ## 
-accuracy_model <- lm(avg_accuracy ~ diversity, data = group_data)
-summary(accuracy_model)
+group_data_wide <- group_data_wide %>%
+  mutate(across(starts_with("agents_"), as.numeric))
+
+group_data_wide <- group_data_wide %>%
+  mutate(
+    avg_neuroticism = rowMeans(select(., starts_with("agents_neuroticism")), na.rm = TRUE),
+    avg_agreeableness = rowMeans(select(., starts_with("agents_agreeableness")), na.rm = TRUE),
+    avg_talkativeness = rowMeans(select(., starts_with("agents_talkativeness")), na.rm = TRUE),
+    avg_critical = rowMeans(select(., starts_with("agents_critical")), na.rm = TRUE),
+    avg_knowledge = rowMeans(select(., starts_with("agents_knowledge")), na.rm = TRUE)
+  )
+
 ```
 
-```{r}
-## synergy models ## 
-weak_synergy_model <- lm(avg_weak_synergy ~ diversity, data = group_data)
-summary(weak_synergy_model)
 
-strong_synergy_model <- lm(avg_strong_synergy ~ diversity, data = group_data)
-summary(strong_synergy_model)
+
+### H.1.1 Groups with high diversity levels will on average have higher gain scores
+```{r}
+## team score/accuracy model ## 
+team_score_model <- lm(team_score ~ diversity_level, data = group_data_wide)
+summary(team_score_model)
+
+## synergy model ## 
+synergy_score_model <- lm(synergy_score ~ diversity_level, data = group_data_wide)
+summary(synergy_score_model)
+
+## gain score model ##
+gain_score_model <- lm(gain_score ~ diversity_level, data = group_data_wide)
+summary(gain_score_model)
+```
+
+
+
+
+## H2.3: Groups with more agents with the dominating trait agreeableness will on average decrease number of rounds
+
+## H2.4: Groups with more agents with the dominating trait talkativeness will on average increase number of rounds
+```{r}
+rounds_trait_model <- lm(n_steps ~ avg_neuroticism + avg_agreeableness + avg_talkativeness + avg_critical + avg_knowledge, data = group_data_wide)
+summary(rounds_trait_model)
+```
+
+##H2.2: Groups with more agents with the dominating traits agreeableness and talkativeness will on average increase gain- and synergy scores
+
+##H2.5: Groups with more agents with the dominating trait critical thinking will on average increase synergy scores
+
+##H2.6: Critical thinking as a personality trait has low influence on gain scores
+
+##H2.9: Groups with more agents with the dominating trait neuroticism will on average decrease synergy and gain scores
+
+```{r}
+gain_trait_model <- lm(gain_score ~ avg_neuroticism + avg_agreeableness + avg_talkativeness + avg_critical + avg_knowledge, data = group_data_wide)
+summary(gain_trait_model)
+
+synergy_trait_model <- lm(synergy_score ~ avg_neuroticism + avg_agreeableness + avg_talkativeness + avg_critical + avg_knowledge, data = group_data_wide)
+summary(synergy_trait_model)
+```
+##H2.8: Groups with more agents with the dominating trait knowledge will on average increase team scores
+```{r}
+team_trait_model <- lm(team_score ~ avg_neuroticism + avg_agreeableness + avg_talkativeness + avg_critical + avg_knowledge, data = group_data_wide)
+summary(team_trait_model)
+```
+
+
+
+```{r}
+#mixed effects model
+gain_trait_model2 <- lmer(gain_score ~ avg_neuroticism + avg_agreeableness + avg_talkativeness + avg_critical + avg_knowledge + 
+              (1 + avg_neuroticism + avg_agreeableness + avg_talkativeness + avg_critical + avg_knowledge | diversity_level ), 
+              data = group_data_wide)
+summary(gain_trait_model2)
+
+
+
 ```
 
 
