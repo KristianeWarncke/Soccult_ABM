@@ -223,7 +223,7 @@ DET ER DATAFRAMES:
 
 # First, create a single list column in the dataframe where each entry is a list of 
 # all agreeableness values for that row which are greater than 1
-dominating_traits <- group_data_wide %>%
+dominating_traits1 <- group_data_wide %>%
   mutate(
     agreeableness_dominant = pmap(list(agents_agreeableness_agent1,
                                        agents_agreeableness_agent2,
@@ -241,7 +241,7 @@ dominating_traits <- group_data_wide %>%
   select(agreeableness_dominant)
 
 # To extract all values into a single list
-all_agreeableness_values <- unlist(dominating_traits$agreeableness_dominant)
+all_agreeableness_values <- unlist(dominating_traits1$agreeableness_dominant)
 
 # Optionally, create a new data frame where these values are stored in a single column
 agreeableness_df <- data.frame(agreeableness = all_agreeableness_values)
@@ -589,21 +589,18 @@ average_steps_per_diversity <- group_data_wide %>%
   group_by(diversity_level) %>%
   summarise(avg_steps_diversity = mean(n_steps, na.rm = TRUE), .groups = 'drop')
 
-sd_average_steps_per_diversity <- group_data_wide %>%
+sd_average_steps_per_diversity <- average_steps_per_diversity %>%
   group_by(diversity_level) %>%
-  summarise(sd_avg_steps_diversity = sd(avg_n_steps, na.rm = TRUE), .groups = 'drop')
+  summarise(sd_avg_steps_diversity = std.error(avg_steps_diversity, na.rm = TRUE), .groups = 'drop')
 
 # Join average steps back to the original dataframe
-group_data_wide <- group_data_wide %>%
-  left_join(average_steps_per_diversity, by = "diversity_level")
+group_data_wide <- average_steps_per_diversity %>%
+  left_join(avg_steps_diversity, by = "diversity_level")
 
 # Join standard deviation of steps back to the original dataframe
-group_data_wide <- group_data_wide %>%
-  left_join(sd_average_steps_per_diversity, by = "diversity_level")
+group_data_wide <- sd_average_steps_per_diversity %>%
+  left_join(sd_average_steps_diversity, by = "diversity_level")
 
-mean_data <- group_data_wide %>% 
-  group_by(diversity_level) %>% 
-  summarise(mean_avg_n_steps = mean(avg_n_steps), sd_mean_avg_n_steps = std.error(avg_n_steps))
 ```
 
 LOL det dårligt....
@@ -648,6 +645,22 @@ ggplot(data = group_data_wide, aes(x = team_score, y = n_steps)) +
   theme_bw()
 ```
 
+```{r}
+#team score and average traits
+team_traits_plot <- ggplot(data = averaged_traits, aes(x = team_score , y = avg_agreeableness)) + geom_point() 
+  #stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
+  guides(fill=FALSE)+
+  #scale_fill_manual(name = "Averaged Traits", palette = "Paired")+
+  labs(title = "Team Score across Diversity Level", y = "Average Team Score", x = "Averaged Traits")+
+  #scale_x_discrete(labels=  c("Low", "Medium", "High")) + 
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
+
+team_traits_plot
+
+```
+
+
 
 ##Correlation plot
 
@@ -680,6 +693,16 @@ group_data_wide <- group_data_wide %>%
     avg_critical = rowMeans(select(., starts_with("agents_critical")), na.rm = TRUE),
     avg_knowledge = rowMeans(select(., starts_with("agents_knowledge")), na.rm = TRUE)
   )
+
+averaged_traits <- group_data_wide %>%
+  mutate(avg_neuroticism = rowMeans(select(., starts_with("agents_neuroticism")), na.rm = TRUE),
+    avg_agreeableness = rowMeans(select(., starts_with("agents_agreeableness")), na.rm = TRUE),
+    avg_talkativeness = rowMeans(select(., starts_with("agents_talkativeness")), na.rm = TRUE),
+    avg_critical = rowMeans(select(., starts_with("agents_critical")), na.rm = TRUE),
+    avg_knowledge = rowMeans(select(., starts_with("agents_knowledge")), na.rm = TRUE),
+    team_score = team_score
+  )%>%
+  select(avg_neuroticism, avg_agreeableness, avg_talkativeness, avg_critical, avg_knowledge, team_score)
 
 ```
 
@@ -745,7 +768,7 @@ summary(gain_trait_model2)
 
 ```
 
-
+------------------------------------------------------------------------------------
 ### H.1.2
 For the second, hypothesis, the data is releveled to a different baseline 
 ```{r}
