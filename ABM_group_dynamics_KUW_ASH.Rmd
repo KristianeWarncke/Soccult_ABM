@@ -11,241 +11,572 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
-pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix)
+pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix, dplyr, ggplot2, stringr, tidyr, gridExtra, grid, purrr, lme4, corrplot, patchwork)
 ```
 
 ## Loading the data 
 ```{r}
-group_data <- read_csv("~/Cognitive_Science/fourth_sem/SocialCulturalDynamics/EXAM/ABM_RankingTask_2015_new2 team5game8 (1)-spreadsheet.csv")
+df <- read.csv2("ABM_FINAL_FINAL.csv")
+```
+
+### PREPROCESSING
+
+```{r}
+#Renaming columns 
+df <- rename(df, 
+                     round = X.run.number., 
+                     team_size = team_size, 
+                     game_size = game_size,
+                     know_sharing = knowledge_sharing,
+                     n_steps = X.step.,
+                     team_score = team_score,
+                     gain_score = gain_score,
+                     synergy_score = synergy_score,
+                     agent_names = agent_names,
+                     reached_consensus = reached_consensus.,
+                     agents_agree = X.agreeableness..of.turtles,
+                     agents_talk = X.talkativeness..of.turtles,
+                     agents_neuro = X.neuroticism..of.turtles,
+                     agents_crit = X.critical_thinking..of.turtles,
+                     agents_know= X.knowledge..of.turtles)
+```
+
+## Converting string vectors to numeric vectors in certain columns
+```{r}
+# Helper function to convert string vectors to numeric vectors
+convert_to_numeric_vector <- function(x) {
+  # Remove unwanted characters
+  cleaned <- gsub("\\[|\\]|\"", "", x)
+  # Split the string by spaces and convert to numeric
+  as.numeric(unlist(strsplit(cleaned, " ")))
+}
+
+# Apply this conversion to each agents_ column
+df <- df %>%
+  mutate(across(starts_with("agents_"), ~map(.x,convert_to_numeric_vector)))
+
+# ..and to the synergy score
+df <- df %>%
+  mutate(across("synergy_score", ~map(.x, convert_to_numeric_vector)))
+
+# and team score
+df <- df %>%
+  mutate(across("team_score", ~map(.x, convert_to_numeric_vector)))
+
+# and gain score
+df <- df %>%
+  mutate(across("gain_score", ~map(.x, convert_to_numeric_vector)))
+
+```
+## Grouping the diversity_score into levels from 1-5 depending on team size 
+```{r}
+# Calculate diversity level
+df <- df %>%
+  mutate(
+    agent_names_cleaned = str_extract_all(agent_names, "\\b\\w+_agent\\b"), # Extract agent types
+    diversity_level = map_int(agent_names_cleaned, ~length(unique(.x))) # Count unique agent types
+  )%>%
+  select(-know_sharing, -team_size, -game_size, -agent_names)
+
+#df$agent_names_cleaned <- lapply(df$agent_names_cleaned, sort)
+
+# Function to remove "_agent" from each element in the list
+clean_agent_names <- function(list) {
+  sapply(list, function(x) gsub("_agent", "", x), USE.NAMES = FALSE)
+}
+
+# Apply the function to each list in the column and sort the cleaned lists
+df$agent_names_cleaned <- lapply(df$agent_names_cleaned, function(x) sort(clean_agent_names(x)))
+```
+
+```{r}
+df <- df %>%
+  mutate(
+    round = as.integer(round),
+    n_steps = as.numeric(n_steps),
+    team_score = as.numeric(team_score),
+    gain_score = as.numeric(gain_score),
+    synergy_score = as.numeric(synergy_score),
+    agent_names_cleaned = as.character(agent_names_cleaned),
+    reached_consensus = as.logical(reached_consensus),  # this is a TRUE/FALSE column
+    diversity_level = as.factor(diversity_level)
+  )
+
+df <- df %>%
+  drop_na() %>%
+  mutate(agree_dom = as.numeric(lapply(agents_agree, mean)))%>%
+  mutate(talk_dom = as.numeric(lapply(agents_talk, mean)))%>%
+  mutate(crit_dom = as.numeric(lapply(agents_crit, mean)))%>%
+  mutate(know_dom = as.numeric(lapply(agents_know, mean)))%>%
+  mutate(neuro_dom = as.numeric(lapply(agents_neuro, mean)))
+
+df <- df %>%
+  mutate(agree_dom_0=agree_dom)%>%
+  mutate(talk_dom_0 =talk_dom)%>%
+  mutate(crit_dom_0 =crit_dom)%>%
+  mutate(know_dom_0 =know_dom)%>%
+  mutate(neuro_dom_0 =neuro_dom)
+
+df <- df %>%
+  mutate(agree_dom= ifelse(agree_dom==0, NA, agree_dom))%>%
+  mutate(talk_dom = ifelse(talk_dom==0, NA, talk_dom))%>%
+  mutate(crit_dom = ifelse(crit_dom==0, NA, crit_dom))%>%
+  mutate(know_dom = ifelse(know_dom==0, NA, know_dom))%>%
+  mutate(neuro_dom = ifelse(neuro_dom==0, NA, neuro_dom))
+
+df <- df %>%
+  mutate(agree_dom_std = scale(df$agree_dom))%>%
+  mutate(talk_dom_std = scale(talk_dom))%>%
+  mutate(crit_dom_std = scale(crit_dom))%>%
+  mutate(know_dom_std = scale(know_dom))%>%
+  mutate(neuro_dom_std = scale(neuro_dom))
+
+df <- df %>%
+  select(round, n_steps, team_score, gain_score, synergy_score, reached_consensus, diversity_level, agents_agree,agree_dom_0, agree_dom, agree_dom_std,  agents_talk, talk_dom_0,talk_dom,talk_dom_std,  agents_crit,crit_dom_0, crit_dom,crit_dom_std,agents_know,know_dom_0,know_dom,know_dom_std,agents_neuro, neuro_dom_0, neuro_dom,neuro_dom_std, agent_names_cleaned)%>%
+  filter(reached_consensus=="TRUE")
 ```
 
 
+## Inspecting Data
 ```{r}
-colnames(group_data)
+#Team, gain and synergy plots
+synergyscore_plot <- ggplot(df, aes(x = synergy_score)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  theme_minimal() +
+  labs(title = "Distribution of Group Performance on the three score-types", x = "Synergy Score", y = "Frequency")
+
+teamscore_plot <- ggplot(df, aes(x = team_score)) +
+  geom_histogram(bins = 30, fill = "lightgreen", color = "black") +
+  theme_minimal() +
+  labs(title = "", x = "Team Score", y = "")
+
+gainscore_plot <- ggplot(df, aes(x = gain_score)) +
+  geom_histogram(bins = 30, fill = "lightpink", color = "black") +
+  theme_minimal() +
+  labs(title = "", x = "Gain score", y = "")
+
+grid.arrange(synergyscore_plot, teamscore_plot, gainscore_plot, ncol=3)
 ```
 
-
-## Grouping the diversity_score into "low, middle, high" 
-Tænker måske det giver mening at gøre det lidt på samme måde?
 ```{r}
-group_data$diversity <- cut(group_data$diversity_score, 
-                      breaks = c(-Inf, 2, 5, Inf),
-                      labels = c("low", "medium", "high"))
-
-
-group_data$diversity <- as.factor(group_data$diversity)
-
-```
-
-
-### Counting: 
-```{r}
-ggplot(data = group_data, aes(x = diversity, fill = diversity)) + 
-  geom_histogram(stat = "count") + 
-  theme_bw()
-
-group_data%>% 
-  group_by(diversity) %>% 
+df%>% 
+  group_by(diversity_level) %>% 
   summarise("count" = n())
 ```
 
 
-## Plotting
-### Synergy
 ```{r}
-#strong synergy
-ggplot(data = group_data, aes(x = diversity, y = avg_strong_synergy, fill = diversity)) + 
-  labs(title = "Strong Synergy")+
+#distribution of agents
+colSums(!is.na(df))[8:22]
+```
+
+### density plots....
+
+```{r}
+#long data to make density plots across traits
+long_data <- df %>%
+  pivot_longer(
+    cols = c("talk_dom_std", "neuro_dom_std", "crit_dom_std", "know_dom_std", "agree_dom_std"),
+    names_to = "trait",
+    values_to = "value"
+  ) %>%
+  drop_na(value)
+
+density_plot_combined <- ggplot(long_data, aes(x = value, fill = trait, color = trait)) +
+  geom_density(alpha = 0.7) +  # Adding transparency to see overlapping areas
+  scale_fill_brewer(palette = "Paired") +  # This sets distinct colors for each trait
+  scale_color_brewer(palette = "Paired") +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Scaled Dominating Traits",
+    x = "Trait Value",
+    y = "Density"
+  ) +
+  scale_x_continuous(limits = c(-4, 6)) +
+  theme(legend.title = element_blank())  # Optionally remove the legend title
+
+density_plot_combined
+```
+
+```{r}
+ggplot(long_data, aes(x = trait, y = value, fill = trait)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set3") +  # Using a color palette for distinction
+  theme_minimal() +
+  labs(title = "Boxplots of Trait Values", x = "Trait", y = "Value") +
+  scale_y_continuous(limits = c(-2, 7)) +
+  theme(legend.position = "none")  # Optional: remove the legend if not needed
+```
+```{r}
+#Calculating average synergy, team and gain scores
+average_synergy_score <- mean(df$synergy_score)
+average_team_score <- mean(df$team_score)
+average_gain_score <- mean(df$gain_score)
+
+# Print the result
+print(paste("Average synergy score:", average_synergy_score))
+print(paste("Average team score:", average_team_score))
+print(paste("Average gain score:", average_gain_score))
+
+```
+
+```{r}
+mean_agree <- mean(df$agree_dom, na.rm = TRUE)
+mean_talk <- mean(df$talk_dom, na.rm = TRUE)
+mean_neuro <- mean(df$neuro_dom, na.rm = TRUE)
+mean_crit <- mean(df$crit_dom, na.rm = TRUE)
+mean_know <- mean(df$know_dom, na.rm = TRUE)
+
+# Print the results
+print(paste("Average agree:", mean_agree))
+print(paste("Average talk:", mean_talk))
+print(paste("Average neuro:", mean_neuro))
+print(paste("Average crit:", mean_crit))
+print(paste("Average know:", mean_know))
+```
+
+```{r}
+freq_table2 <- df %>%
+  group_by(diversity_level, lists_str) %>%
+  summarise(Frequency = n(), .groups = 'drop')
+
+# Create the grouped bar plot using ggplot2 without labels
+p2 <- ggplot(freq_table2, aes(x = reorder(lists_str, -Frequency), y = Frequency, fill=diversity_level)) +
+  geom_bar(stat = 'identity') +
+  labs(title = "Group Constallations and Frequency",
+       x = "Groups",
+       y = "Frequency",
+       fill = "Diversity Level") +
+  scale_fill_brewer(palette = "Paired")+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8))
+
+p2 #All names are readable on the saved picture
+ggsave("p2.png", width = 20, height = 10, bg = 'white')
+```
+
+# ANALYSIS
+
+## Diversity Level Performance
+
+### Plotting scores vs diversity
+```{r}
+df$diversity_level <- as.factor(df$diversity_level)
+#synergy
+ggplot(data = df, aes(x = diversity_level, y = synergy_score, fill = diversity_level)) + 
+  labs(title = "Synergy and Diversity Level")+
   geom_violin()
-```
 
-```{r}
-#weak synergy
-ggplot(data = group_data, aes(x = diversity, y = avg_weak_synergy, fill = diversity)) + 
-  labs(title = "Weak Synergy")+
-  geom_violin()
-```
-
-
-### Accuracy 
-```{r}
-#accuracy and diversity
-ggplot(data = group_data, aes(x = diversity, y = avg_accuracy, fill = diversity)) + 
-  labs(title = "Accuracy")+
-  geom_violin()
-```
-
-```{r}
-#accuracy and number of ticks/rounds
-ggplot(data = group_data, aes(x = avg_accuracy, y = avg_n_tick)) + 
-  labs(title = "Accuracy and Number of Ticks")+
-  geom_point(aes(color = diversity)) + 
-  theme_bw()
-```
-
-### Sanity Checks
-```{r}
-consensus <- ggplot(group_data, aes(x=avg_consensus))+
-  geom_density(color="black", fill="#FE6EA3") +
-  theme_bw() +
-  labs(title = "Consensus", y = "Density", x = "Average Consensus") + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16)+
-    guides(fill=FALSE)
-
-weak_synergy <- ggplot(group_data, aes(x=avg_weak_synergy))+
-  geom_density(color="black", fill="#8495FF") +
-  theme_bw() +
-  labs(title = "Weak Synergy", y = "Density", x = "Average Weak Synergy") + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16)+
-    guides(fill=FALSE)
-
-plots <- ggarrange(consensus, weak_synergy)
-plots
-
-ggsave(plots, filename = "consensus_synergy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-### H.1.1 (hypotese 1 tror jeg)
-```{r}
-accuracy <- ggplot(data = group_data, aes(x = diversity, y = avg_accuracy, fill = diversity)) + 
+#team score
+team_diversity_plot <- ggplot(data = df, aes(x = diversity_level, y = team_score, fill = diversity_level)) + 
   geom_violin() + 
   geom_boxplot(width = 0.1, outlier.size=-1) + 
   scale_y_continuous(labels = scales::percent_format(accuracy=1))+
   stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
   guides(fill=FALSE)+
-  scale_fill_manual(name = "diversity", values = c('#40E0D0','#00CCFF', '#EC7063'))+
-  labs(title = "(A) Accuracy", y = "Average Accuracy", x = "Diversity")+
-  scale_x_discrete(labels=  c("Low", "Medium", "High")) + 
+  #scale_fill_manual(name = "diversity level", palette = "Paired")+
+  labs(title = "Team Score across Diversity Level", y = "Average Team Score", x = "Diversity")+
+  #scale_x_discrete(labels=  c("Low", "Medium", "High")) + 
   theme_bw()+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
-
-accuracy
-
-ggsave(accuracy, filename = "accuracy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-```{r}
-weak_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_weak_synergy, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "Weak Synergy", y = "Density", x = "Average Weak Synergy") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
 
-strong_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_strong_synergy, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "Strong Synergy", y = "Density", x = "Average Strong Synergy") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
+
+#gain score
+gain__diversity_plot <- ggplot(data = df, aes(x = diversity_level, y = gain_score, fill = diversity_level)) + 
+  geom_violin() + 
+  geom_boxplot(width = 0.1, outlier.size=-1) + 
+  scale_y_continuous(labels = scales::percent_format(accuracy=1))+
+  stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
+  guides(fill=FALSE)+
+  #scale_fill_manual(name = "diversity level", palette = "Paired")+
+  labs(title = "Gain Score across Diversity Level", y = "Average Gain Score", x = "Diversity")+
+  theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
 
-synergy_diversity_plots <- ggarrange(weak_diversity, strong_diversity)
-
-#ggsave(synergy_diversity_plots, filename = "synergy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
+team_diversity_plot
+gain__diversity_plot
 ```
 
-
+### Diversity Level and Number of Rounds
 ```{r}
-synergy_data <- group_data %>% 
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low")))
+mean_data <- df %>% 
+  group_by(diversity_level) %>% 
+  summarise(mean_avg_n_steps = (mean(n_steps, na.rm = TRUE)), sd_mean_avg_n_steps = (sd(n_steps, na.rm = TRUE)), error_mean_avg_n_steps = (std.error(n_steps, na.rm = TRUE)))
+
+tbl1 <- tableGrob(mean_data, theme=ttheme_minimal(), rows=NULL)
+
+wrap_plots(tbl1)
+
+df <- df%>%
+  mutate(diversity_level=as.integer(diversity_level))
+
+ggplot(df, aes(diversity_level, n_steps))+
+  geom_point()+
+  geom_smooth(method='lm', formula= y~x)
+```
+
+## Different Group Constallations
+```{r}
+# Convert each list to a character string
+df$diversity_level<-as.factor(df$diversity_level)
+
+df$lists_str <- sapply(df$agent_names_cleaned, function(x) paste(sort(x), collapse = ","))
+
+# Create a frequency table of unique lists by diversity_level
+freq_table <- df %>%
+  group_by(lists_str, diversity_level)%>%
+  summarise(gain_score=mean(gain_score))
 
 
-synergy <- ggplot(synergy_data, aes(x=avg_strong_synergy, y=avg_weak_synergy, color = diversity))+
-  geom_point(size = 1)+
-  scale_color_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
-  theme_bw()+
-  labs(y = "Average Weak Synergy", x = "Average Strong Synergy") + 
-  theme(text=element_text(family = "Times New Roman"))
 
+# Create the grouped bar plot using ggplot2 without labels
+p1 <- ggplot(freq_table, aes(x = reorder(lists_str, -gain_score), y = gain_score, fill=diversity_level)) +
+  geom_bar(stat = 'identity') +
+  labs(title = "Group Constallations and Gain Scores",
+       x = "Groups",
+       y = "Gain_score",
+       fill = "Diversity Level") +
+  scale_fill_brewer(palette = "Paired")+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8))
+
+p1 #All names are readable on the saved picture
+ggsave("p1.png", width = 20, height = 10, bg = 'white')
+```
+
+## Other
+
+### Gain score and Number of Discussion Rounds
+```{r}
+#accuracy and number of ticks/rounds
+ggplot(df, aes(x = gain_score, y = n_steps)) + 
+  labs(title = "Gain score and Number of Discussion Rounds")+
+  geom_point(aes(color=diversity_level))+
+  geom_smooth(method='lm', formula= y~x) + 
+  theme_bw()
+```
+## Personality Traits and Group Performance
+
+###Cheking for normality
+```{r}
+round(pastecs::stat.desc(cbind(team_score=df$team_score[1:4000], synergy_score=df$synergy_score[1:4000], gain_score=df$gain_score[1:4000], neuro=df$neuro_dom[1:4000], know=df$know_dom[1:4000], agree=df$agree_dom[1:4000], crit=df$crit_dom[1:4000], talk=df$talk_dom[1:4000]), basic = FALSE, norm = TRUE), digits = 2)
+```
+
+### Correlation Plot
+```{r}
+df$diversity_level <- as.integer(df$diversity_level)
+df_cor <- df %>%
+  select(n_steps, team_score, gain_score, synergy_score, diversity_level, agree_dom_0, crit_dom_0, talk_dom_0, neuro_dom_0, know_dom_0)%>%
+  cor()
   
-synergy_dists <- ggMarginal(synergy, groupFill = TRUE, size = 2, alpha = 0.6)
+df_cor%>%
+  corrplot(method="number", number.cex=0.6)
 
-synergy_dists
+df_cor%>%
+  corrplot(method="circle", number.cex=0.6)
 
-#ggsave(synergy_dists, filename = "synergy_distributions_scatter.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
+df_cor <- round(df_cor,2)
 
-
-### H.1.2 (hypotese 2)
-```{r}
-consensus_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_consensus, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "(A) Consensus", y = "Density", x = "Average Consensus") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
-
-ggsave(consensus_diversity, filename = "consensus_diversity.jpeg", dpi = 300, type = "cairo", width = 5, height = 5, units = "in")
-
+data.frame(df_cor)
 ```
 
 
 ```{r}
-mean_data <- group_data %>% 
-  group_by(diversity) %>% 
-  summarise(mean_avg_n_tick = mean(avg_n_tick), sd_mean_avg_n_tick = std.error(avg_n_tick))
+set.seed(894)
 
-ticks_plot <- ggplot(data = mean_data, aes(x = diversity, y = mean_avg_n_tick, color = diversity, ymin = (mean_avg_n_tick - 2*sd_mean_avg_n_tick), ymax = (mean_avg_n_tick + 2*sd_mean_avg_n_tick))) +
-  geom_errorbar(width = 0.5, size = 1.5)+
-  ylim(6, 8) + 
-  geom_point(size = 3, shape = 18, color = "black") +
-  scale_color_manual(name = "diversity", values = c('#40E0D0','#00CCFF', '#EC7063'), labels=  c("Low", "Medium", "High"))+
-  labs(title = "(B) Discussion Rounds", y = "Average Number of Discussion Rounds", x = "Diversity")+
-  scale_x_discrete(labels=  c("Low", "Medium", "High"))+
-  coord_equal(ratio = 2)+
-  guides(color=FALSE)+
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
+svmfit <- svm(diagnosis ~ ., data = train_data, kernel = "radial")
 
-ticks_plot
+predictions <- predict(svmfit, newdata = test_data)
 
-ggsave(ticks_plot, filename = "ticks_plot.jpeg", dpi = 300, type = "cairo", width = 4, height = 5, units = "in")
+# Confusion matrix which also provides accuracy
+confusionMatrix(test_data$diagnosis, predictions) 
 ```
 
+_Regression models with interactions:_ The folder `Beauty` contains data (use file `beauty.csv`) from Hamermesh and Parker (2005) on student evaluations of instructors’ beauty and teaching quality for several courses at the University of Texas. The teaching evaluations were conducted at the end of the semester, and the beauty judgments were made later, by six students who had not attended the classes and were not aware of the course evaluations.
 
-## STATS 
-
-### H.1.1 Synergy and Accuracy 
+### a) Run a regression using beauty (the variable `beauty`) to predict course evaluations (`eval`), adjusting for various other predictors. Graph the data and fitted model, and explain the meaning of each of the coefficients along with the residual standard deviation. Plot the residuals versus fitted values. (Lelia)
+```{r }
+beauty <- read.csv("C:/Users/Annes/OneDrive - Aarhus universitet/Methods/METHODS_2/methods-2-resources/data/Beauty/data/beauty.csv")
+head(beauty)
+```
 ```{r}
-## accuracy model ## 
-accuracy_model <- lm(avg_accuracy ~ diversity, data = group_data)
-summary(accuracy_model)
+b_pred <- stan_glm(eval ~ beauty+female+age+minority+nonenglish+lower, data=beauty, refresh = 0)
+summary(b_pred, digits = 5)
 ```
+- Only considering the beauty parameter, the slope would be 0.14 and has an sd of 0.03. 
+- Adding the female parameter would contribute with -0.2 and has an sd of 0.05
+- Adding the age parameter would contribute with -0.002 and has an sd of 0.003
+- Adding the minority parameter would contribute with -0.07 and has an sd of 0.08
+- Adding the nonenglish parameter would contribute with -0.27 and has an sd of 0.11
+- Adding the lower parameter would contribute with 0.1 and has an sd of 0.05
+
+
+```{r }
+b1 <- ggplot(beauty, aes(beauty, eval)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(b_pred)[1],
+    slope = sum(coef(b_pred)[2])) +
+  labs(x = "Beauty", y = "Evaluation")
+
+b2 <- ggplot(beauty, aes(female, eval)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(b_pred)[1],
+    slope = sum(coef(b_pred)[3])) +
+  labs(x = "female", y = "Evaluation")
+
+b3 <- ggplot(beauty, aes(age, eval)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(b_pred)[1],
+    slope = sum(coef(b_pred)[4])) +
+  labs(x = "Age", y = "Evaluation")
+
+b4 <- ggplot(beauty, aes(minority, eval)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(b_pred)[1],
+    slope = sum(coef(b_pred)[5])) +
+  labs(x = "Minority", y = "Evaluation")
+
+b5 <- ggplot(beauty, aes(nonenglish, eval)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(b_pred)[1],
+    slope = sum(coef(b_pred)[6])) +
+  labs(x = "Non-English", y = "Evaluation")
+
+b6 <- ggplot(beauty, aes(lower, eval)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(b_pred)[1],
+    slope = sum(coef(b_pred)[7])) +
+  labs(x = "Lower devision classes", y = "Evaluation")
+plot_grid(b1, b2, b3, b4, b5, b6, ncol=3)
+```
+For all the plots, all other predictors than the one at the x-axis, are as follows:  
+- Beauty: 0  
+- Female(Gender): male  
+- Age: 0  
+- Minority: non-minority  
+- Non-English(language): English-speaker  
+- Lower devision classes: non-lower devision classes  
+
+Taking this into account:  
+- Higher beauty score = better evaluation  
+- Being a male = better evaluation  
+- Higher age = worse evaluation  
+- Non-minority = better evaluation  
+- English-speaker = better evaluation  
+- Lower devision classes = better evaluation  
+
 
 ```{r}
-## synergy models ## 
-weak_synergy_model <- lm(avg_weak_synergy ~ diversity, data = group_data)
-summary(weak_synergy_model)
+# Residual versus fitted values plot
+plot(fitted(b_pred),resid(b_pred))
+abline(0,0)
 
-strong_synergy_model <- lm(avg_strong_synergy ~ diversity, data = group_data)
-summary(strong_synergy_model)
 ```
+From this plot we see that the residual vs fitted values are not equally distributed.
 
-
-### H.1.2
-For the second, hypothesis, the data is releveled to a different baseline 
-```{r}
-relevel_group <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low")))
-```
-
+### b) Fit some other models, including beauty and also other predictors. Consider at least one model with interactions. For each model, explain the meaning of each of its estimated coefficients. (Kristiane & Victoria)
 
 ```{r}
-## ticks model ## 
-ticks_model <- lm(avg_n_tick ~ diversity, data = relevel_group)
-summary(ticks_model)
+m1 <- stan_glm(eval ~ beauty+female*minority, data=beauty, refresh = 0) 
+print(m1, digits=5)
 ```
 
+The summary shows that for every 1 step increase of the independant variable, the 
+- beauty-predictor contributes with a 0.16 increase to the slope
+- female-predictor contributes with a -0.14 decrease to the slope 
+- minority-predictor contributes with a 0.08 increase to the slope 
+- the combination of being a female and minority contributes to a -0.35 decrease to the slope.
+
+
 ```{r}
-## consensus model ## 
-consensus_model <- lm(avg_consensus ~ diversity, data = relevel_group)
-summary(consensus_model)
+m2 <- stan_glm(eval ~ beauty+age, data=beauty, refresh = 0) 
+print(m2, digits=5)
 ```
+The summary shows that for every 1 step increase of the independent variable, the 
+- beauty-predictor contributes with a 0.13 increase to the slope
+- age-predictor contributes with a 0.0002 increase to the slope 
+
+```{r}
+m3 <- stan_glm(eval ~ beauty+female*age+minority+nonenglish, data=beauty, refresh = 0) 
+print(m3, digits=5)
+```
+
+The summary shows that for every 1 step increase of the independent variable, the
+- beauty-predictor contributes with a 0.14 increase to the slope
+- female-predictor contributes with a 0.24 decrease to the slope 
+- age-predictor contributes with a 0.0005 increase to the slope 
+- minority-predicter contributes with a -0.05 decrease to the slope
+- nonenglish-predicter contributes with a 0.29 increase to the slope
+- the interaction between age and being a female contributes to a -0.01 decrease to the slope.
+
+```{r}
+m4 <- stan_glm(eval ~ beauty*female+age+lower, data=beauty, refresh = 0) 
+print(m4, digits=5)
+```
+The summary shows that for every 1 step increase of the independent variable, the
+- beauty-predictor contributes with a 0.19 increase to the slope
+- female-predictor contributes with a -0.2 decrease to the slope 
+- age-predictor contributes with a -0.0014 decrease to the slope 
+- lower-predictor contributes to a 0.11 increase in the slope
+- the interaction between  female and beauty contributes to a -0.1 decrease to the slope.
+
+
+# 3. Exercise 10.7
+
+_Predictive simulation for linear regression:_ Take one of the models from the previous exercise.
+
+### a) Instructor A is a 50-year-old woman who is a native English speaker and has a beauty score of -1. Instructor B is a 60-year-old man who is a native English speaker and has a beauty score of -0.5. Simulate 1000 random draws of the course evaluation rating of these two instructors. In your simulation, use posterior_predict to account for the uncertainty in the regression parameters as well as predictive uncertainty. (Lelia & Anne)
+
+We are using the model m2 with beauty and age as predictors of evaluation score: 
+
+\begin{align*}
+eval \sim  beauty + age
+\end{align*}
+
+
+```{r}
+# Creating a data frame with the informations regarding the two people
+df1 <- data.frame(beauty=c(-1, -0.5), age=c(50,60), female=c(1,0), nonenglish=c(0,0))
+df1
+
+# Creating another data frame where the information is used to simulate a 
+# posterior prediction with 1000 draws of the evaluation score for each of the 
+# instructors
+pred1 <- data.frame(posterior_predict(m2, newdata=df1))
+
+pred1 <- dplyr::filter(pred1, row_number()<1001)
+
+head(pred1)
+```
+
+### b) Make a histogram of the difference between the course evaluations for A and B. What is the probability that A will have a higher evaluation? (Mads)
+```{r}
+#Calculating the difference between the course evaluations for A and B
+pred1$difference <- pred1$X1-pred1$X2
+
+# Creating a histogram of the differences between the course evaluations for A 
+#and B
+ggplot(pred1, aes(difference))+
+geom_histogram(aes(y=..density..), colour = "black", fill = "aliceblue", binwidth=  0.05)+
+  theme_minimal()+
+  stat_function(fun=dnorm,args=list(mean=mean(pred1$difference),sd = sd(pred1$difference)),colour = "red", size =1)+
+  geom_vline(xintercept = 0, color="Blue", size = 1) +
+  ggtitle("Histogram for difference") 
+
+
+# Creating a function filtering out all the times A's evaluation is higher than 
+#B's
+a <- length(Filter(function(diff) { 
+    diff > 0 }, 
+    pred1$difference))  # Calculating the percentage the weight exeeds the limit 
+    
+# Calculating the percentage
+a/1000
+```
+There's a ~45% chance that A will have a higher evaluation scores than B.
