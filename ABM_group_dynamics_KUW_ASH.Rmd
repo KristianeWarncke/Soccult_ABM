@@ -167,7 +167,7 @@ df%>%
 
 ```{r}
 #distribution of agents
-colSums(!is.na(df))[8:22]
+colSums(!is.na(df))[8:27]
 ```
 
 ### density plots....
@@ -347,18 +347,22 @@ ggsave("p1.png", width = 20, height = 10, bg = 'white')
 ### Gain score and Number of Discussion Rounds
 ```{r}
 #accuracy and number of ticks/rounds
+df$diversity_level <- as.factor(df$diversity_level)
+
 ggplot(df, aes(x = gain_score, y = n_steps)) + 
   labs(title = "Gain score and Number of Discussion Rounds")+
   geom_point(aes(color=diversity_level))+
+  scale_fill_brewer(palette = "Paired")+
   geom_smooth(method='lm', formula= y~x) + 
   theme_bw()
 ```
 ## Personality Traits and Group Performance
 
-###Cheking for normality
+###Cheking for normality - It's all good
 ```{r}
 round(pastecs::stat.desc(cbind(team_score=df$team_score[1:4000], synergy_score=df$synergy_score[1:4000], gain_score=df$gain_score[1:4000], neuro=df$neuro_dom[1:4000], know=df$know_dom[1:4000], agree=df$agree_dom[1:4000], crit=df$crit_dom[1:4000], talk=df$talk_dom[1:4000]), basic = FALSE, norm = TRUE), digits = 2)
 ```
+The Shapiro-Wilk test (normtest.W) results in a p-value of <0.05 for all parameters, and we can consider that all the distributions are normal.
 
 ### Correlation Plot
 ```{r}
@@ -393,40 +397,40 @@ etc.
 b1 <- ggplot(df, aes(agree_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred2)[1],
-    slope = sum(coef(b_pred2)[2]),
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[2]),
     color = "red") +
   labs(x = "Agree", y = "Gain_score")
 
 b2 <- ggplot(df, aes(talk_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred2)[1],
-    slope = sum(coef(b_pred2)[3]),
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[3]),
     color = "red") +
   labs(x = "Talk", y = "Gain_score")
 
 b3 <- ggplot(df, aes(crit_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred2)[1],
-    slope = sum(coef(b_pred2)[4]),
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[4]),
     color = "red") +
   labs(x = "Critical", y = "Gain_score")
 
 b4 <- ggplot(df, aes(neuro_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred2)[1],
-    slope = sum(coef(b_pred2)[5]),
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[5]),
     color = "red") +
   labs(x = "Neuroticism", y = "Gain_score")
 
 b5 <- ggplot(df, aes(know_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred2)[1],
-    slope = sum(coef(b_pred2)[6]),
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[6]),
     color = "red") +
   labs(x = "Knowledge", y = "Gain_score")
 
