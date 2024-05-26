@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
-pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix, dplyr, ggplot2, stringr, tidyr, gridExtra, grid, purrr, lme4, corrplot, patchwork)
+pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix, dplyr, ggplot2, stringr, tidyr, gridExtra, grid, purrr, lme4, corrplot, patchwork, rstanarm, cowplot)
 ```
 
 ## Loading the data 
@@ -236,6 +236,16 @@ print(paste("Average know:", mean_know))
 ```
 
 ```{r}
+# Convert each list to a character string
+df$diversity_level<-as.factor(df$diversity_level)
+
+df$lists_str <- sapply(df$agent_names_cleaned, function(x) paste(sort(x), collapse = ","))
+
+# Create a frequency table of unique lists by diversity_level
+freq_table <- df %>%
+  group_by(lists_str, diversity_level)%>%
+  summarise(gain_score=mean(gain_score))
+
 freq_table2 <- df %>%
   group_by(diversity_level, lists_str) %>%
   summarise(Frequency = n(), .groups = 'drop')
@@ -317,18 +327,6 @@ ggplot(df, aes(diversity_level, n_steps))+
 
 ## Different Group Constallations
 ```{r}
-# Convert each list to a character string
-df$diversity_level<-as.factor(df$diversity_level)
-
-df$lists_str <- sapply(df$agent_names_cleaned, function(x) paste(sort(x), collapse = ","))
-
-# Create a frequency table of unique lists by diversity_level
-freq_table <- df %>%
-  group_by(lists_str, diversity_level)%>%
-  summarise(gain_score=mean(gain_score))
-
-
-
 # Create the grouped bar plot using ggplot2 without labels
 p1 <- ggplot(freq_table, aes(x = reorder(lists_str, -gain_score), y = gain_score, fill=diversity_level)) +
   geom_bar(stat = 'identity') +
@@ -382,183 +380,92 @@ data.frame(df_cor)
 
 
 ```{r}
-set.seed(894)
-
-svmfit <- svm(diagnosis ~ ., data = train_data, kernel = "radial")
-
-predictions <- predict(svmfit, newdata = test_data)
-
-# Confusion matrix which also provides accuracy
-confusionMatrix(test_data$diagnosis, predictions) 
+m1 <- stan_glm(gain_score ~ agree_dom_std+talk_dom_std+crit_dom_std+ neuro_dom_std+ know_dom_std, data=df, refresh = 0)
+summary(m1, digits = 5)
 ```
 
-_Regression models with interactions:_ The folder `Beauty` contains data (use file `beauty.csv`) from Hamermesh and Parker (2005) on student evaluations of instructors’ beauty and teaching quality for several courses at the University of Texas. The teaching evaluations were conducted at the end of the semester, and the beauty judgments were made later, by six students who had not attended the classes and were not aware of the course evaluations.
-
-### a) Run a regression using beauty (the variable `beauty`) to predict course evaluations (`eval`), adjusting for various other predictors. Graph the data and fitted model, and explain the meaning of each of the coefficients along with the residual standard deviation. Plot the residuals versus fitted values. (Lelia)
-```{r }
-beauty <- read.csv("C:/Users/Annes/OneDrive - Aarhus universitet/Methods/METHODS_2/methods-2-resources/data/Beauty/data/beauty.csv")
-head(beauty)
-```
-```{r}
-b_pred <- stan_glm(eval ~ beauty+female+age+minority+nonenglish+lower, data=beauty, refresh = 0)
-summary(b_pred, digits = 5)
-```
-- Only considering the beauty parameter, the slope would be 0.14 and has an sd of 0.03. 
-- Adding the female parameter would contribute with -0.2 and has an sd of 0.05
-- Adding the age parameter would contribute with -0.002 and has an sd of 0.003
-- Adding the minority parameter would contribute with -0.07 and has an sd of 0.08
-- Adding the nonenglish parameter would contribute with -0.27 and has an sd of 0.11
-- Adding the lower parameter would contribute with 0.1 and has an sd of 0.05
-
+The summary shows that for every 1 step increase of the independent variable, the 
+- agree-predictor contributes with -0.02  to the slope
+- talk-predictor contributes with  0.1 to the slope 
+etc.
 
 ```{r }
-b1 <- ggplot(beauty, aes(beauty, eval)) +
+b1 <- ggplot(df, aes(agree_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred)[1],
-    slope = sum(coef(b_pred)[2])) +
-  labs(x = "Beauty", y = "Evaluation")
+    intercept = coef(b_pred2)[1],
+    slope = sum(coef(b_pred2)[2]),
+    color = "red") +
+  labs(x = "Agree", y = "Gain_score")
 
-b2 <- ggplot(beauty, aes(female, eval)) +
+b2 <- ggplot(df, aes(talk_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred)[1],
-    slope = sum(coef(b_pred)[3])) +
-  labs(x = "female", y = "Evaluation")
+    intercept = coef(b_pred2)[1],
+    slope = sum(coef(b_pred2)[3]),
+    color = "red") +
+  labs(x = "Talk", y = "Gain_score")
 
-b3 <- ggplot(beauty, aes(age, eval)) +
+b3 <- ggplot(df, aes(crit_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred)[1],
-    slope = sum(coef(b_pred)[4])) +
-  labs(x = "Age", y = "Evaluation")
+    intercept = coef(b_pred2)[1],
+    slope = sum(coef(b_pred2)[4]),
+    color = "red") +
+  labs(x = "Critical", y = "Gain_score")
 
-b4 <- ggplot(beauty, aes(minority, eval)) +
+b4 <- ggplot(df, aes(neuro_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred)[1],
-    slope = sum(coef(b_pred)[5])) +
-  labs(x = "Minority", y = "Evaluation")
+    intercept = coef(b_pred2)[1],
+    slope = sum(coef(b_pred2)[5]),
+    color = "red") +
+  labs(x = "Neuroticism", y = "Gain_score")
 
-b5 <- ggplot(beauty, aes(nonenglish, eval)) +
+b5 <- ggplot(df, aes(know_dom_std, gain_score)) +
   geom_point() +
   geom_abline(
-    intercept = coef(b_pred)[1],
-    slope = sum(coef(b_pred)[6])) +
-  labs(x = "Non-English", y = "Evaluation")
+    intercept = coef(b_pred2)[1],
+    slope = sum(coef(b_pred2)[6]),
+    color = "red") +
+  labs(x = "Knowledge", y = "Gain_score")
 
-b6 <- ggplot(beauty, aes(lower, eval)) +
-  geom_point() +
-  geom_abline(
-    intercept = coef(b_pred)[1],
-    slope = sum(coef(b_pred)[7])) +
-  labs(x = "Lower devision classes", y = "Evaluation")
-plot_grid(b1, b2, b3, b4, b5, b6, ncol=3)
+
+plot_grid(b1, b2, b3, b4, b5, ncol=2)
 ```
-For all the plots, all other predictors than the one at the x-axis, are as follows:  
-- Beauty: 0  
-- Female(Gender): male  
-- Age: 0  
-- Minority: non-minority  
-- Non-English(language): English-speaker  
-- Lower devision classes: non-lower devision classes  
-
-Taking this into account:  
-- Higher beauty score = better evaluation  
-- Being a male = better evaluation  
-- Higher age = worse evaluation  
-- Non-minority = better evaluation  
-- English-speaker = better evaluation  
-- Lower devision classes = better evaluation  
-
-
 ```{r}
 # Residual versus fitted values plot
-plot(fitted(b_pred),resid(b_pred))
+plot(fitted(m1),resid(m1))
 abline(0,0)
-
 ```
-From this plot we see that the residual vs fitted values are not equally distributed.
+From this plot we see that the residual vs fitted values are equally distributed.
 
-### b) Fit some other models, including beauty and also other predictors. Consider at least one model with interactions. For each model, explain the meaning of each of its estimated coefficients. (Kristiane & Victoria)
 
+### A task for inspecting specific situations
 ```{r}
-m1 <- stan_glm(eval ~ beauty+female*minority, data=beauty, refresh = 0) 
-print(m1, digits=5)
-```
-
-The summary shows that for every 1 step increase of the independant variable, the 
-- beauty-predictor contributes with a 0.16 increase to the slope
-- female-predictor contributes with a -0.14 decrease to the slope 
-- minority-predictor contributes with a 0.08 increase to the slope 
-- the combination of being a female and minority contributes to a -0.35 decrease to the slope.
-
-
-```{r}
-m2 <- stan_glm(eval ~ beauty+age, data=beauty, refresh = 0) 
-print(m2, digits=5)
-```
-The summary shows that for every 1 step increase of the independent variable, the 
-- beauty-predictor contributes with a 0.13 increase to the slope
-- age-predictor contributes with a 0.0002 increase to the slope 
-
-```{r}
-m3 <- stan_glm(eval ~ beauty+female*age+minority+nonenglish, data=beauty, refresh = 0) 
-print(m3, digits=5)
-```
-
-The summary shows that for every 1 step increase of the independent variable, the
-- beauty-predictor contributes with a 0.14 increase to the slope
-- female-predictor contributes with a 0.24 decrease to the slope 
-- age-predictor contributes with a 0.0005 increase to the slope 
-- minority-predicter contributes with a -0.05 decrease to the slope
-- nonenglish-predicter contributes with a 0.29 increase to the slope
-- the interaction between age and being a female contributes to a -0.01 decrease to the slope.
-
-```{r}
-m4 <- stan_glm(eval ~ beauty*female+age+lower, data=beauty, refresh = 0) 
-print(m4, digits=5)
-```
-The summary shows that for every 1 step increase of the independent variable, the
-- beauty-predictor contributes with a 0.19 increase to the slope
-- female-predictor contributes with a -0.2 decrease to the slope 
-- age-predictor contributes with a -0.0014 decrease to the slope 
-- lower-predictor contributes to a 0.11 increase in the slope
-- the interaction between  female and beauty contributes to a -0.1 decrease to the slope.
-
-
-# 3. Exercise 10.7
-
-_Predictive simulation for linear regression:_ Take one of the models from the previous exercise.
-
 ### a) Instructor A is a 50-year-old woman who is a native English speaker and has a beauty score of -1. Instructor B is a 60-year-old man who is a native English speaker and has a beauty score of -0.5. Simulate 1000 random draws of the course evaluation rating of these two instructors. In your simulation, use posterior_predict to account for the uncertainty in the regression parameters as well as predictive uncertainty. (Lelia & Anne)
 
-We are using the model m2 with beauty and age as predictors of evaluation score: 
+m2 <- stan_glm(gain_score ~ agree_dom_0+talk_dom_0+crit_dom_0+ neuro_dom_0+ know_dom_0, data=df, refresh = 0)
+summary(m2, digits = 5)
 
-\begin{align*}
-eval \sim  beauty + age
-\end{align*}
-
-
-```{r}
 # Creating a data frame with the informations regarding the two people
-df1 <- data.frame(beauty=c(-1, -0.5), age=c(50,60), female=c(1,0), nonenglish=c(0,0))
-df1
+df_1 <- df%>%
+  select(gain_score, agree_dom_0, talk_dom_0,crit_dom_0,neuro_dom_0, know_dom_0)%>%
+  filter(agree_dom_0>2, crit_dom_0>0.1)
 
 # Creating another data frame where the information is used to simulate a 
 # posterior prediction with 1000 draws of the evaluation score for each of the 
 # instructors
-pred1 <- data.frame(posterior_predict(m2, newdata=df1))
+pred1 <- as.data.frame(posterior_predict(m2, newdata=df_1))
 
 pred1 <- dplyr::filter(pred1, row_number()<1001)
 
 head(pred1)
-```
 
 ### b) Make a histogram of the difference between the course evaluations for A and B. What is the probability that A will have a higher evaluation? (Mads)
-```{r}
+
 #Calculating the difference between the course evaluations for A and B
-pred1$difference <- pred1$X1-pred1$X2
+pred1$difference <- pred1$'1'-pred1$'2'
 
 # Creating a histogram of the differences between the course evaluations for A 
 #and B
@@ -578,5 +485,6 @@ a <- length(Filter(function(diff) {
     
 # Calculating the percentage
 a/1000
-```
+
 There's a ~45% chance that A will have a higher evaluation scores than B.
+```
