@@ -16,7 +16,7 @@ pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix, dplyr, ggplot2, stri
 
 ## Loading the data 
 ```{r}
-df <- read.csv2("~/Cognitive_Science/fourth_sem/SocialCulturalDynamics/EXAM/Soccult_ABM/abm-cps-master/ABM_FINAL_trial.csv")
+df <- read.csv2("~/Cognitive_Science/fourth_sem/SocialCulturalDynamics/EXAM/Soccult_ABM/abm-cps-master/ABM_FINAL_FINAL.csv")
 ```
 
 ### PREPROCESSING
@@ -119,6 +119,7 @@ df <- df %>%
   select(round, n_steps, team_score, gain_score, synergy_score, reached_consensus, diversity_level, agents_agree,agree_dom, agree_dom_std,  agents_talk,talk_dom,talk_dom_std,  agents_crit,crit_dom,crit_dom_std,agents_know,know_dom,know_dom_std,agents_neuro, neuro_dom,neuro_dom_std, agent_names_cleaned
          )%>%
   filter(reached_consensus=="TRUE")
+
 ```
 
 
@@ -162,6 +163,7 @@ ggplot(data = df, aes(x = diversity_level, fill = diversity_level)) +
 #distribution of agents
 colSums(!is.na(df))[8:22]
 ```
+
 
 ### density plots....
 
@@ -232,7 +234,7 @@ print(paste("Average know:", mean_know))
 
 ```{r}
 df <- df %>%
-  mutate(diversity_level = as_factor(diversity_level))
+  filter(diversity_level != 1)
 ```
 
 
@@ -248,12 +250,10 @@ ggplot(data = df, aes(x = diversity_level, y = synergy_score, fill = diversity_l
 team_diversity_plot <- ggplot(data = df, aes(x = diversity_level, y = team_score, fill = diversity_level)) + 
   geom_violin() + 
   geom_boxplot(width = 0.1, outlier.size=-1) + 
-  #scale_y_continuous(labels = scales::percent_format(accuracy=1))+
   stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
   guides(fill=FALSE)+
   scale_fill_brewer(palette = "Paired")+
-  labs(title = "Team Score across Diversity Level", y = "Average Team Score", x = "Diversity")+
-  #scale_x_discrete(labels=  c("Low", "Medium", "High")) + 
+  labs(title = "Team Score across Diversity Level", y = "Team Score", x = "Diversity Level")+
   theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
 
@@ -262,11 +262,10 @@ team_diversity_plot <- ggplot(data = df, aes(x = diversity_level, y = team_score
 gain__diversity_plot <- ggplot(data = df, aes(x = diversity_level, y = gain_score, fill = diversity_level)) + 
   geom_violin() + 
   geom_boxplot(width = 0.1, outlier.size=-1) + 
-  #scale_y_continuous(labels = scales::percent_format(accuracy=1))+
   stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
   guides(fill=FALSE)+
   scale_fill_brewer(palette = "Paired")+
-  labs(title = "Gain Score across Diversity Level", y = "Average Team Score", x = "Diversity")+
+  labs(title = "Gain Score across Diversity Level", y = "Gain Score", x = "Diversity Level")+
   theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
 
@@ -301,14 +300,25 @@ ggplot(df, aes(diversity_level, n_steps))+
 ```{r}
 #accuracy and number of ticks/rounds
 
+df <- df%>%
+  mutate(diversity_level=as.factor(diversity_level))
+
 ggplot(df, aes(x = team_score, y = n_steps, color = diversity_level)) + 
   labs(title = "Team score and Number of Discussion Rounds", y = "Number of Discussion Rounds", x = "Team Score")+
   geom_point()+
   geom_smooth(method='lm', formula= y~x) + 
-  scale_fill_brewer(palette = "Paired") +
+  scale_fill_brewer(palette = "Set 3") +
   theme_bw()
 ```
 
+```{r}
+ggplot(df, aes(x = gain_score, y = n_steps, color = diversity_level)) + 
+  labs(title = "Gain score and Number of Discussion Rounds", y = "Number of Discussion Rounds", x = "Gain Score")+
+  geom_point()+
+  geom_smooth(method='lm', formula= y~x, color = "red") + 
+  scale_color_manual(values = c("2" = "lightblue","3" = "darkcyan","4" = "lightgreen", "5" = "forestgreen")) +
+  theme_bw()
+```
 
 
 ```{r}
@@ -342,27 +352,36 @@ df <- df %>%
   filter(diversity_level != 1)
 
 # team score/accuracy model
-team_score_model <- lm(team_score ~ diversity_level, data = df)
-summary(team_score_model)
+m1 <- lm(team_score ~ diversity_level, data = df)
+summary(m1)
 
 # synergy model
-synergy_score_model <- lm(synergy_score ~ diversity_level, data = df)
-summary(synergy_score_model)
+m2 <- lm(synergy_score ~ diversity_level, data = df)
+summary(m2)
 
 # gain score model
-gain_score_model <- lm(gain_score ~ diversity_level, data = df)
-summary(gain_score_model)
+m3 <- lm(gain_score ~ diversity_level, data = df)
+summary(m3)
 ```
 
+H1.2: diversity, n_steps
+```{r}
+m4 <- lm(n_steps ~ diversity_level, data = df)
+summary(m4)
+```
 
 
 
 ## H2.3: Groups with more agents with the dominating trait agreeableness will on average decrease number of rounds
 
 ## H2.4: Groups with more agents with the dominating trait talkativeness will on average increase number of rounds
+
+LAV OM TIL STANDARDIZED
+
+
 ```{r}
-rounds_trait_model <- lm(n_steps ~ agree_dom + talk_dom + crit_dom + know_dom + neuro_dom, data = df)
-summary(rounds_trait_model)
+m5 <- lm(n_steps ~ agree_dom_std + talk_dom_std + crit_dom_std + know_dom_std + neuro_dom_std, data = df)
+summary(m5)
 ```
 
 ##H2.2: Groups with more agents with the dominating traits agreeableness and talkativeness will on average increase gain- and synergy scores
@@ -374,11 +393,11 @@ summary(rounds_trait_model)
 ##H2.9: Groups with more agents with the dominating trait neuroticism will on average decrease synergy and gain scores
 
 ```{r}
-gain_trait_model <- lm(gain_score ~ agree_dom + talk_dom + crit_dom + know_dom + neuro_dom, data = df)
-summary(gain_trait_model)
+m6 <- lm(gain_score ~ agree_dom_std + talk_dom_std + crit_dom_std + know_dom_std + neuro_dom_std, data = df)
+summary(m6)
 
-synergy_trait_model <- lm(synergy_score ~ agree_dom + talk_dom + crit_dom + know_dom + neuro_dom, data = df)
-summary(synergy_trait_model)
+m7 <- lm(synergy_score ~ agree_dom_std + talk_dom_std + crit_dom_std + know_dom_std + neuro_dom_std, data = df)
+summary(m7)
 ```
 ```
 
