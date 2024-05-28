@@ -126,23 +126,18 @@ df <- df %>%
 # Data visualization
 
 ```{r}
-#Team, gain and synergy plots
-synergyscore_plot <- ggplot(df, aes(x = synergy_score)) +
-  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
-  theme_minimal() +
-  labs(title = "Distribution of Group Performance on the three score-types", x = "Synergy Score", y = "Frequency")
-
-teamscore_plot <- ggplot(df, aes(x = team_score)) +
+#gain and n_steps plots
+nsteps_plot <- ggplot(df, aes(x = n_steps)) +
   geom_histogram(bins = 30, fill = "lightgreen", color = "black") +
   theme_minimal() +
-  labs(title = "", x = "Team Score", y = "")
+  labs(title = "Distribution of Performance Metrics", x = "Number of Discussion Rounds", y = "")
 
 gainscore_plot <- ggplot(df, aes(x = gain_score)) +
   geom_histogram(bins = 30, fill = "lightpink", color = "black") +
   theme_minimal() +
   labs(title = "", x = "Gain score", y = "")
 
-grid.arrange(synergyscore_plot, teamscore_plot, gainscore_plot, ncol=3)
+grid.arrange(nsteps_plot, gainscore_plot, ncol=3)
 ```
 
 ```{r}
@@ -259,10 +254,11 @@ team_diversity_plot <- ggplot(data = df, aes(x = diversity_level, y = team_score
 
 
 #gain score
-gain__diversity_plot <- ggplot(data = df, aes(x = diversity_level, y = gain_score, fill = diversity_level)) + 
+gain__diversity_plot <- ggplot(data = df, aes(x = as.factor(diversity_level), y = gain_score, fill = diversity_level)) + 
   geom_violin() + 
   geom_boxplot(width = 0.1, outlier.size=-1) + 
-  stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
+  stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+
+  geom_smooth(aes(group = 1), method = "lm", se = FALSE, color = "black", linetype = "dashed") +
   guides(fill=FALSE)+
   scale_fill_brewer(palette = "Paired")+
   labs(title = "Gain Score across Diversity Level", y = "Gain Score", x = "Diversity Level")+
@@ -319,6 +315,20 @@ ggplot(df, aes(x = gain_score, y = n_steps, color = diversity_level)) +
   scale_color_manual(values = c("2" = "lightblue","3" = "darkcyan","4" = "lightgreen", "5" = "forestgreen")) +
   theme_bw()
 ```
+```{r}
+#tics and diversity
+ticks_gain_plot <- ggplot(data = mean_data, aes(x = diversity_level, y = mean_avg_n_steps, color = diversity_level, ymin = (mean_avg_n_steps - 2*error_mean_avg_n_steps), ymax = (mean_avg_n_steps + 2*error_mean_avg_n_steps))) +
+  geom_errorbar(width = 0.5, size = 1.5)+
+  ylim(16, 19.5) + 
+  geom_point(size = 3, shape = 18, color = "black") +
+  labs(title = "Discussion Rounds", y = "Average Number of Discussion Rounds", x = "Diversity")+
+    coord_equal(ratio = 2)+
+  guides(color=FALSE)+
+  theme_bw()
+  #theme(plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
+
+ticks_diversity_plot
+```
 
 
 ```{r}
@@ -351,54 +361,26 @@ Annes com
 df <- df %>%
   filter(diversity_level != 1)
 
-# team score/accuracy model
-m1 <- lm(team_score ~ diversity_level, data = df)
-summary(m1)
-
-# synergy model
-m2 <- lm(synergy_score ~ diversity_level, data = df)
-summary(m2)
-
 # gain score model
-m3 <- lm(gain_score ~ diversity_level, data = df)
-summary(m3)
+m1 <- lm(gain_score ~ diversity_level, data = df)
+summary(m1)
 ```
 
 H1.2: diversity, n_steps
 ```{r}
-m4 <- lm(n_steps ~ diversity_level, data = df)
+m2 <- lm(n_steps ~ diversity_level, data = df)
+summary(m2)
+```
+
+```{r}
+m3 <- lm(gain_score ~ agree_dom_std + talk_dom_std + crit_dom_std + know_dom_std + neuro_dom_std, data = df)
+summary(m3)
+```
+```{r}
+m4 <- lm(n_steps ~ agree_dom_std + talk_dom_std + crit_dom_std + know_dom_std + neuro_dom_std, data = df)
 summary(m4)
 ```
 
 
-
-## H2.3: Groups with more agents with the dominating trait agreeableness will on average decrease number of rounds
-
-## H2.4: Groups with more agents with the dominating trait talkativeness will on average increase number of rounds
-
-LAV OM TIL STANDARDIZED
-
-
-```{r}
-m5 <- lm(n_steps ~ agree_dom_std + talk_dom_std + crit_dom_std + know_dom_std + neuro_dom_std, data = df)
-summary(m5)
-```
-
-##H2.2: Groups with more agents with the dominating traits agreeableness and talkativeness will on average increase gain- and synergy scores
-
-##H2.5: Groups with more agents with the dominating trait critical thinking will on average increase synergy scores
-
-##H2.6: Critical thinking as a personality trait has low influence on gain scores
-
-##H2.9: Groups with more agents with the dominating trait neuroticism will on average decrease synergy and gain scores
-
-```{r}
-m6 <- lm(gain_score ~ agree_dom_std + talk_dom_std + crit_dom_std + know_dom_std + neuro_dom_std, data = df)
-summary(m6)
-
-m7 <- lm(synergy_score ~ agree_dom_std + talk_dom_std + crit_dom_std + know_dom_std + neuro_dom_std, data = df)
-summary(m7)
-```
-```
 
 
