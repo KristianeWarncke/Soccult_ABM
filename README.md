@@ -1,0 +1,1 @@
+This is the repository for Kristiane Uhrenholt Warncke and Anne Skamris Holms Social & Cultural Dynamics Exam Project about group dynamics and personality types. In the repository we both have the NetLogo code, Rstudio visualisations + stats, and all the simulated data.
