@@ -11,241 +11,803 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
-pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix)
+pacman::p_load(tidyverse, ggpubr, ggalt, ggExtra,  plotrix, dplyr, ggplot2, stringr, tidyr, gridExtra, grid, purrr, lme4, corrplot, patchwork, rstanarm, cowplot)
 ```
 
 ## Loading the data 
 ```{r}
-group_data <- read_csv("~/Cognitive_Science/fourth_sem/SocialCulturalDynamics/EXAM/ABM_RankingTask_2015_new2 team5game8 (1)-spreadsheet.csv")
+df <- read.csv2("ABM_FINAL_FINAL.csv")
+```
+
+### PREPROCESSING
+
+```{r}
+#Renaming columns 
+df <- rename(df, 
+                     round = X.run.number., 
+                     team_size = team_size, 
+                     game_size = game_size,
+                     know_sharing = knowledge_sharing,
+                     n_steps = X.step.,
+                     team_score = team_score,
+                     gain_score = gain_score,
+                     synergy_score = synergy_score,
+                     agent_names = agent_names,
+                     reached_consensus = reached_consensus.,
+                     agents_agree = X.agreeableness..of.turtles,
+                     agents_talk = X.talkativeness..of.turtles,
+                     agents_neuro = X.neuroticism..of.turtles,
+                     agents_crit = X.critical_thinking..of.turtles,
+                     agents_know= X.knowledge..of.turtles)
+```
+
+## Converting string vectors to numeric vectors in certain columns
+```{r}
+# Helper function to convert string vectors to numeric vectors
+convert_to_numeric_vector <- function(x) {
+  # Remove unwanted characters
+  cleaned <- gsub("\\[|\\]|\"", "", x)
+  # Split the string by spaces and convert to numeric
+  as.numeric(unlist(strsplit(cleaned, " ")))
+}
+
+# Apply this conversion to each agents_ column
+df <- df %>%
+  mutate(across(starts_with("agents_"), ~map(.x,convert_to_numeric_vector)))
+
+# ..and to the synergy score
+df <- df %>%
+  mutate(across("synergy_score", ~map(.x, convert_to_numeric_vector)))
+
+# and team score
+df <- df %>%
+  mutate(across("team_score", ~map(.x, convert_to_numeric_vector)))
+
+# and gain score
+df <- df %>%
+  mutate(across("gain_score", ~map(.x, convert_to_numeric_vector)))
+
+```
+## Grouping the diversity_score into levels from 1-5 depending on team size 
+```{r}
+# Calculate diversity level
+df <- df %>%
+  mutate(
+    agent_names_cleaned = str_extract_all(agent_names, "\\b\\w+_agent\\b"), # Extract agent types
+    diversity_level = map_int(agent_names_cleaned, ~length(unique(.x))) # Count unique agent types
+  )%>%
+  select(-know_sharing, -team_size, -game_size, -agent_names)
+
+#df$agent_names_cleaned <- lapply(df$agent_names_cleaned, sort)
+
+# Function to remove "_agent" from each element in the list
+clean_agent_names <- function(list) {
+  sapply(list, function(x) gsub("_agent", "", x), USE.NAMES = FALSE)
+}
+
+# Apply the function to each list in the column and sort the cleaned lists
+df$agent_names_cleaned <- lapply(df$agent_names_cleaned, function(x) sort(clean_agent_names(x)))
+```
+
+```{r}
+df <- df %>%
+  mutate(
+    round = as.integer(round),
+    n_steps = as.numeric(n_steps),
+    team_score = as.numeric(team_score),
+    gain_score = as.numeric(gain_score),
+    synergy_score = as.numeric(synergy_score),
+    agent_names_cleaned = as.character(agent_names_cleaned),
+    reached_consensus = as.logical(reached_consensus),  # this is a TRUE/FALSE column
+    diversity_level_num = as.integer(diversity_level),
+    diversity_level_fac = as.factor(diversity_level)
+  )
+
+df <- df %>%
+  drop_na() %>%
+  mutate(agree_dom = as.numeric(lapply(agents_agree, mean)))%>%
+  mutate(talk_dom = as.numeric(lapply(agents_talk, mean)))%>%
+  mutate(crit_dom = as.numeric(lapply(agents_crit, mean)))%>%
+  mutate(know_dom = as.numeric(lapply(agents_know, mean)))%>%
+  mutate(neuro_dom = as.numeric(lapply(agents_neuro, mean)))
+
+df <- df %>%
+  mutate(agree_dom_0=agree_dom)%>%
+  mutate(talk_dom_0 =talk_dom)%>%
+  mutate(crit_dom_0 =crit_dom)%>%
+  mutate(know_dom_0 =know_dom)%>%
+  mutate(neuro_dom_0 =neuro_dom)
+
+df <- df %>%
+  mutate(agree_dom= ifelse(agree_dom==0, NA, agree_dom))%>%
+  mutate(talk_dom = ifelse(talk_dom==0, NA, talk_dom))%>%
+  mutate(crit_dom = ifelse(crit_dom==0, NA, crit_dom))%>%
+  mutate(know_dom = ifelse(know_dom==0, NA, know_dom))%>%
+  mutate(neuro_dom = ifelse(neuro_dom==0, NA, neuro_dom))
+
+df <- df %>%
+  mutate(agree_dom_std = scale(df$agree_dom))%>%
+  mutate(talk_dom_std = scale(talk_dom))%>%
+  mutate(crit_dom_std = scale(crit_dom))%>%
+  mutate(know_dom_std = scale(know_dom))%>%
+  mutate(neuro_dom_std = scale(neuro_dom))
+
+df <- df %>%
+  mutate(agree_dom_std_0=scale(df$agree_dom_0))%>%
+  mutate(talk_dom_std_0 =scale(df$talk_dom_0))%>%
+  mutate(crit_dom_std_0 =scale(df$crit_dom_0))%>%
+  mutate(know_dom_std_0 =scale(df$know_dom_0))%>%
+  mutate(neuro_dom_std_0 =scale(df$neuro_dom_0))
+
+df <- df %>%
+  select(round, n_steps, team_score, gain_score, synergy_score, reached_consensus, diversity_level_num, diversity_level_fac, agents_agree,agree_dom_0, agree_dom, agree_dom_std, agree_dom_std_0,  agents_talk, talk_dom_0,talk_dom,talk_dom_std, talk_dom_std_0, agents_crit,crit_dom_0, crit_dom,crit_dom_std,crit_dom_std_0, agents_know,know_dom_0,know_dom,know_dom_std,know_dom_std_0,agents_neuro, neuro_dom_0, neuro_dom,neuro_dom_std, neuro_dom_std_0, agent_names_cleaned)%>%
+  dplyr::filter(reached_consensus=="TRUE", diversity_level_num!=1)
+
+df <- df%>%
+  arrange(round)
 ```
 
 
+## Inspecting Data
 ```{r}
-colnames(group_data)
+#Team, gain and synergy plots
+gain_plot <- ggplot(df, aes(x = gain_score)) +
+  geom_histogram(aes(y=after_stat(density)), bins = 30, fill = "lightpink", color = "black") +
+  stat_function(fun=dnorm,args=list(mean=mean(df$gain_score),sd = sd(df$gain_score)),colour = "red", linewidth =1)+
+  theme_minimal() +
+  labs(title = "Distribution of Gain Scores", x = "Gain Score", y = "Frequency")
+
+discussion_plot <- ggplot(df, aes(x = n_steps)) +
+  geom_histogram(aes(y=after_stat(density)), bins = 30, fill = "skyblue", color = "black") +
+  stat_function(fun=dnorm,args=list(mean=mean(df$n_steps),sd = sd(df$n_steps)),colour = "red", linewidth =1)+
+  theme_minimal() +
+  labs(title = "Distribution of Discussion Rounds", x = "Number of Discussion Rounds", y = "Frequency")
+
+
+grid.arrange(gain_plot, discussion_plot, ncol=2)
+
+# library(car)
+# qqPlot(df$gain_log)
+# 
+# 
+# 
+# norm <- round(pastecs::stat.desc(cbind(Gain_score=df$gain_score[1:5000],Discussion_rounds=df$n_steps_1[1:5000]), basic = FALSE, norm = TRUE), digits = 5)
+# norm <- norm %>%
+#   filter()
+# 
+# shapiro.test(df$n_steps_log[1:5000])
+# 
+# df <- df%>%
+#   mutate(n_steps_log=log(n_steps),
+#          n_steps_1 = 1/n_steps,
+#          n_steps_sqrt=sqrt(n_steps),
+#          gain_log=sqrt(gain_score))
+# 
+# teamscore_plot <- ggplot(df, aes(x = team_score)) +
+#   geom_histogram(bins = 30, fill = "lightgreen", color = "black") +
+#   theme_minimal() +
+#   labs(title = "", x = "Team Score", y = "")
+# 
+# gainscore_plot <- ggplot(df, aes(x = gain_score)) +
+#   geom_histogram(bins = 30, fill = "lightpink", color = "black") +
+#   theme_minimal() +
+#   labs(title = "", x = "Gain score", y = "")
+# 
+# 
+# ggplot1 <- ggplot(data,aes(Response))+geom_histogram(aes(y=..density..),colour = "black", fill = "aliceblue",binwidth = 0.05)+stat_function(fun=dnorm,args=list(mean=mean(data$Response),sd = sd(data$Response)),colour = "red", size =1)+theme_minimal()+ggtitle("Histogram for Response")
 ```
 
-
-## Grouping the diversity_score into "low, middle, high" 
-Tænker måske det giver mening at gøre det lidt på samme måde?
 ```{r}
-group_data$diversity <- cut(group_data$diversity_score, 
-                      breaks = c(-Inf, 2, 5, Inf),
-                      labels = c("low", "medium", "high"))
-
-
-group_data$diversity <- as.factor(group_data$diversity)
-
-```
-
-
-### Counting: 
-```{r}
-ggplot(data = group_data, aes(x = diversity, fill = diversity)) + 
-  geom_histogram(stat = "count") + 
-  theme_bw()
-
-group_data%>% 
-  group_by(diversity) %>% 
+df%>% 
+  group_by(diversity_level_num) %>% 
   summarise("count" = n())
 ```
 
 
-## Plotting
-### Synergy
 ```{r}
-#strong synergy
-ggplot(data = group_data, aes(x = diversity, y = avg_strong_synergy, fill = diversity)) + 
-  labs(title = "Strong Synergy")+
-  geom_violin()
+#distribution of agents
+colSums(!is.na(df))[8:27]
+```
+
+### density plots....
+
+```{r}
+#long data to make density plots across traits
+long_data <- df %>%
+  pivot_longer(
+    cols = c("talk_dom_std", "neuro_dom_std", "crit_dom_std", "know_dom_std", "agree_dom_std"),
+    names_to = "trait",
+    values_to = "value"
+  ) %>%
+  drop_na(value)
+
+density_plot_combined <- ggplot(long_data, aes(x = value, fill = trait, color = trait)) +
+  geom_density(alpha = 0.7) +  # Adding transparency to see overlapping areas
+  scale_fill_brewer(palette = "Paired") +  # This sets distinct colors for each trait
+  scale_color_brewer(palette = "Paired") +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Scaled Dominating Traits",
+    x = "Trait Value",
+    y = "Density"
+  ) +
+  scale_x_continuous(limits = c(-4, 6)) +
+  theme(legend.title = element_blank())  # Optionally remove the legend title
+
+density_plot_combined
 ```
 
 ```{r}
-#weak synergy
-ggplot(data = group_data, aes(x = diversity, y = avg_weak_synergy, fill = diversity)) + 
-  labs(title = "Weak Synergy")+
-  geom_violin()
+ggplot(long_data, aes(x = trait, y = value, fill = trait)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set3") +  # Using a color palette for distinction
+  theme_minimal() +
+  labs(title = "Boxplots of Trait Values", x = "Trait", y = "Value") +
+  scale_y_continuous(limits = c(-2, 7)) +
+  theme(legend.position = "none")  # Optional: remove the legend if not needed
+```
+```{r}
+#Calculating average synergy, team and gain scores
+average_synergy_score <- mean(df$synergy_score)
+average_team_score <- mean(df$team_score)
+average_gain_score <- mean(df$gain_score)
+
+# Print the result
+print(paste("Average synergy score:", average_synergy_score))
+print(paste("Average team score:", average_team_score))
+print(paste("Average gain score:", average_gain_score))
+
 ```
 
-
-### Accuracy 
 ```{r}
-#accuracy and diversity
-ggplot(data = group_data, aes(x = diversity, y = avg_accuracy, fill = diversity)) + 
-  labs(title = "Accuracy")+
-  geom_violin()
+mean_agree <- mean(df$agree_dom, na.rm = TRUE)
+mean_talk <- mean(df$talk_dom, na.rm = TRUE)
+mean_neuro <- mean(df$neuro_dom, na.rm = TRUE)
+mean_crit <- mean(df$crit_dom, na.rm = TRUE)
+mean_know <- mean(df$know_dom, na.rm = TRUE)
+
+# Print the results
+print(paste("Average agree:", mean_agree))
+print(paste("Average talk:", mean_talk))
+print(paste("Average neuro:", mean_neuro))
+print(paste("Average crit:", mean_crit))
+print(paste("Average know:", mean_know))
 ```
 
 ```{r}
-#accuracy and number of ticks/rounds
-ggplot(data = group_data, aes(x = avg_accuracy, y = avg_n_tick)) + 
-  labs(title = "Accuracy and Number of Ticks")+
-  geom_point(aes(color = diversity)) + 
-  theme_bw()
+# Convert each list to a character string
+
+df$lists_str <- sapply(df$agent_names_cleaned, function(x) paste(sort(x), collapse = ","))
+
+# Create a frequency table of unique lists by diversity_level
+freq_table <- df %>%
+  group_by(lists_str, diversity_level_fac, diversity_level_num, n_steps)%>%
+  summarise(gain_score=mean(gain_score))
+
+freq_table2 <- df %>%
+  group_by(diversity_level_fac, lists_str) %>%
+  summarise(Frequency = n(), .groups = 'drop')
+
+# Create the grouped bar plot using ggplot2 without labels
+p2 <- ggplot(freq_table2, aes(x = reorder(lists_str, -Frequency), y = Frequency, fill=diversity_level_fac)) +
+  geom_bar(stat = 'identity') +
+  labs(title = "Group Constallations and Frequency",
+       x = "Groups",
+       y = "Frequency",
+       fill = "Diversity Level") +
+  scale_fill_brewer(palette = "Paired")+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8))
+
+p2 #All names are readable on the saved picture
+ggsave("p2.png", width = 20, height = 10, bg = 'white')
+
 ```
 
-### Sanity Checks
+# ANALYSIS
+
+## Diversity Level Performance
+
+### Plotting scores vs diversity
 ```{r}
-consensus <- ggplot(group_data, aes(x=avg_consensus))+
-  geom_density(color="black", fill="#FE6EA3") +
-  theme_bw() +
-  labs(title = "Consensus", y = "Density", x = "Average Consensus") + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16)+
-    guides(fill=FALSE)
+#gain score
+library(patchwork)
 
-weak_synergy <- ggplot(group_data, aes(x=avg_weak_synergy))+
-  geom_density(color="black", fill="#8495FF") +
-  theme_bw() +
-  labs(title = "Weak Synergy", y = "Density", x = "Average Weak Synergy") + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16)+
-    guides(fill=FALSE)
+m3 <- lm(gain_score ~ diversity_level_num, data=df)
+summary(m3, digits = 2)
 
-plots <- ggarrange(consensus, weak_synergy)
-plots
-
-ggsave(plots, filename = "consensus_synergy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-### H.1.1 (hypotese 1 tror jeg)
-```{r}
-accuracy <- ggplot(data = group_data, aes(x = diversity, y = avg_accuracy, fill = diversity)) + 
+gain__diversity_plot <- ggplot(data = df, aes(x = diversity_level_fac, y = gain_score, fill = diversity_level_fac)) + 
   geom_violin() + 
   geom_boxplot(width = 0.1, outlier.size=-1) + 
-  scale_y_continuous(labels = scales::percent_format(accuracy=1))+
+  #scale_y_continuous(labels = scales::percent_format(accuracy=1))+
   stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
   guides(fill=FALSE)+
-  scale_fill_manual(name = "diversity", values = c('#40E0D0','#00CCFF', '#EC7063'))+
-  labs(title = "(A) Accuracy", y = "Average Accuracy", x = "Diversity")+
-  scale_x_discrete(labels=  c("Low", "Medium", "High")) + 
+  #scale_fill_manual(name = "diversity level", palette = "Paired")+
+  labs(title = "Gain Score ~ Diversity Level", y = "Gain Score", x = "Diversity")+
   theme_bw()+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
-
-accuracy
-
-ggsave(accuracy, filename = "accuracy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-```{r}
-weak_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_weak_synergy, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "Weak Synergy", y = "Density", x = "Average Weak Synergy") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
 
-strong_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_strong_synergy, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "Strong Synergy", y = "Density", x = "Average Strong Synergy") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
+gain__diversity_plot <- gain__diversity_plot +
+  geom_smooth(data = df, aes(x = diversity_level_num, y = gain_score), 
+              method = "lm", color = "black", inherit.aes = FALSE, fullrange = T)
+gain__diversity_plot
+ggsave("gain__diversity_plot.png", width = 8, height = 5, bg = 'white')
+
+mean_data2 <- df %>% 
+  group_by(diversity_level_fac) %>% 
+  summarise(mean_gain_score = (mean(gain_score, na.rm = TRUE)), sd_mean_gain_score = (sd(gain_score, na.rm = TRUE)), error_mean_gain_score = (std.error(gain_score, na.rm = TRUE)))
+
+tbl2 <- tableGrob(mean_data2, theme=ttheme_minimal(), rows=NULL)
+
+wrap_plots(tbl2)
+```
+
+### Diversity Level and Number of Rounds
+```{r}
+m4 <- lm(n_steps ~ diversity_level_num, data=df)
+summary(m4, digits = 2)
+
+mean_data <- df %>% 
+  group_by(diversity_level_fac) %>% 
+  summarise(mean_avg_n_steps = (mean(n_steps, na.rm = TRUE)), sd_mean_avg_n_steps = (sd(n_steps, na.rm = TRUE)), error_mean_avg_n_steps = (std.error(n_steps, na.rm = TRUE)))
+
+tbl1 <- tableGrob(mean_data, theme=ttheme_minimal(), rows=NULL)
+
+wrap_plots(tbl1)
+
+rounds_diversity_plot <- ggplot(data = df, aes(x = diversity_level_fac, y = n_steps, fill = diversity_level_fac)) + 
+  geom_violin() + 
+  geom_boxplot(width = 0.1, outlier.size=-1) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size=2, colour="white", alpha = 0.8)+ 
+  guides(fill=FALSE)+
+  #scale_fill_manual(name = "diversity level", palette = "Paired")+
+  labs(title = "Number of Rounds across Diversity Level", y = "Number of Rounds", x = "Diversity")+
+  theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
 
-synergy_diversity_plots <- ggarrange(weak_diversity, strong_diversity)
 
-#ggsave(synergy_diversity_plots, filename = "synergy.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
+rounds_diversity_plot <- rounds_diversity_plot +
+  geom_smooth(data = df, aes(x = diversity_level_num, y = n_steps), 
+              method = "lm", color = "black", inherit.aes = FALSE, fullrange = T)
+rounds_diversity_plot
+ggsave("rounds_diversity_plot.png", width = 20, height = 10, bg = 'white')
 
-
-```{r}
-synergy_data <- group_data %>% 
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low")))
-
-
-synergy <- ggplot(synergy_data, aes(x=avg_strong_synergy, y=avg_weak_synergy, color = diversity))+
-  geom_point(size = 1)+
-  scale_color_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
-  theme_bw()+
-  labs(y = "Average Weak Synergy", x = "Average Strong Synergy") + 
-  theme(text=element_text(family = "Times New Roman"))
-
-  
-synergy_dists <- ggMarginal(synergy, groupFill = TRUE, size = 2, alpha = 0.6)
-
-synergy_dists
-
-#ggsave(synergy_dists, filename = "synergy_distributions_scatter.jpeg", dpi = 300, type = "cairo", width = 7, height = 3.5, units = "in")
-```
-
-
-### H.1.2 (hypotese 2)
-```{r}
-consensus_diversity <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low"))) %>%
-ggplot(aes(x=avg_consensus, fill = diversity))+
-  geom_density(alpha = 0.6) +
-  theme_bw() +
-  labs(title = "(A) Consensus", y = "Density", x = "Average Consensus") + 
-  scale_fill_manual(name = "Diversity", values = c('#EC7063','#00CCFF','#40E0D0'), labels =c("High", "Medium", "Low"))+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
-
-ggsave(consensus_diversity, filename = "consensus_diversity.jpeg", dpi = 300, type = "cairo", width = 5, height = 5, units = "in")
 
 ```
-
-
 ```{r}
-mean_data <- group_data %>% 
-  group_by(diversity) %>% 
-  summarise(mean_avg_n_tick = mean(avg_n_tick), sd_mean_avg_n_tick = std.error(avg_n_tick))
+mean_data <- df %>% 
+  group_by(diversity_level_fac) %>% 
+  summarise(mean_avg_n_steps = (mean(n_steps, na.rm = TRUE)), sd_mean_avg_n_steps = (sd(n_steps, na.rm = TRUE)), error_mean_avg_n_steps = (std.error(n_steps, na.rm = TRUE)))
 
-ticks_plot <- ggplot(data = mean_data, aes(x = diversity, y = mean_avg_n_tick, color = diversity, ymin = (mean_avg_n_tick - 2*sd_mean_avg_n_tick), ymax = (mean_avg_n_tick + 2*sd_mean_avg_n_tick))) +
+rounds_diversity_plot_error <- ggplot(data = mean_data, aes(x = diversity_level_fac, y = mean_avg_n_steps, color = diversity_level_fac, ymin = (mean_avg_n_steps - 2*error_mean_avg_n_steps), ymax = (mean_avg_n_steps + 2*error_mean_avg_n_steps))) +
   geom_errorbar(width = 0.5, size = 1.5)+
-  ylim(6, 8) + 
-  geom_point(size = 3, shape = 18, color = "black") +
-  scale_color_manual(name = "diversity", values = c('#40E0D0','#00CCFF', '#EC7063'), labels=  c("Low", "Medium", "High"))+
-  labs(title = "(B) Discussion Rounds", y = "Average Number of Discussion Rounds", x = "Diversity")+
-  scale_x_discrete(labels=  c("Low", "Medium", "High"))+
-  coord_equal(ratio = 2)+
+  ylim(16, 19.5) + 
+  geom_point(size = 2, shape = 18, color = "black") +
+  labs(title = "Discussion Rounds ~ Diversity", y = "Number of Discussion Rounds", x = "Diversity")+
+    coord_equal(ratio = 2)+
   guides(color=FALSE)+
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
+  theme_bw()
+  #theme(plot.title = element_text(hjust = 0.5, size = 16), text=element_text(family = "Times New Roman"))
 
-ticks_plot
-
-ggsave(ticks_plot, filename = "ticks_plot.jpeg", dpi = 300, type = "cairo", width = 4, height = 5, units = "in")
-```
-
-
-## STATS 
-
-### H.1.1 Synergy and Accuracy 
-```{r}
-## accuracy model ## 
-accuracy_model <- lm(avg_accuracy ~ diversity, data = group_data)
-summary(accuracy_model)
-```
-
-```{r}
-## synergy models ## 
-weak_synergy_model <- lm(avg_weak_synergy ~ diversity, data = group_data)
-summary(weak_synergy_model)
-
-strong_synergy_model <- lm(avg_strong_synergy ~ diversity, data = group_data)
-summary(strong_synergy_model)
-```
-
-
-### H.1.2
-For the second, hypothesis, the data is releveled to a different baseline 
-```{r}
-relevel_group <- group_data %>%
-  mutate(diversity = factor(diversity, levels = c("high", "medium", "low")))
+ggsave("rounds_diversity_plot_error.png", width = 5, height = 4, bg = 'white')
 ```
 
 
 ```{r}
-## ticks model ## 
-ticks_model <- lm(avg_n_tick ~ diversity, data = relevel_group)
-summary(ticks_model)
+m1 <- lm(gain_score ~ diversity_level_fac, data=df)
+summary(m1, digits = 5)
+
+m1 <- lm(gain_score ~ diversity_level_num, data=df)
+summary(m1, digits = 5)
+```
+## Different Group Constallations
+```{r}
+freq_table <- df %>%
+  group_by(lists_str, diversity_level_fac)%>%
+  summarise(gain_score=mean(gain_score))
+  
+
+freq_table
+# Create the grouped bar plot using ggplot2 without labels
+group_gain <- ggplot(freq_table, aes(x = reorder(lists_str, -gain_score), y = gain_score, fill=diversity_level_fac)) +
+  geom_bar(stat = 'identity') +
+  labs(title = "Group Constallations and Gain Scores",
+       x = "Groups",
+       y = "Gain_score",
+       fill = "Diversity Level_fac") +
+  scale_fill_brewer(palette = "Paired")+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 9))
+
+
+group_gain #All names are readable on the saved picture
+ggsave("group_gain.png", width = 20, height = 10, bg = 'white')
+
+
+freq_table2 <- df %>%
+  group_by(lists_str, diversity_level_fac)%>%
+  summarise(n_steps=mean(n_steps))
+
+# Create the grouped bar plot using ggplot2 without labels
+group_rounds <- ggplot(freq_table2, aes(x = reorder(lists_str, -n_steps), y = n_steps, fill=diversity_level_fac)) +
+  geom_bar(stat = 'identity') +
+  labs(title = "Group Constallations and Number of Rounds",
+       x = "Groups",
+       y = "n_steps",
+       fill = "Diversity Level") +
+  scale_fill_brewer(palette = "Paired")+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 9))
+
+group_rounds #All names are readable on the saved picture
+ggsave("group_rounds.png", width = 20, height = 10, bg = 'white')
+```
+
+
+## Other
+
+### Gain score and Number of Discussion Rounds
+```{r}
+#accuracy and number of ticks/rounds
+
+ggplot(df, aes(x = n_steps, y = gain_score)) + 
+  labs(title = "Gain score and Number of Discussion Rounds")+
+  geom_point(aes(color=diversity_level_fac))+
+  scale_fill_brewer(palette = "Paired")+
+  geom_smooth(method='lm', formula= y~x) + 
+  theme_bw()
+
+
+m1 <- lm(gain_score ~ n_steps, data=df)
+summary(m1, digits = 5)
+```
+## Personality Traits and Group Performance
+
+###Cheking for normality - It's all good
+```{r}
+round(pastecs::stat.desc(cbind(team_score=df$team_score[1:4000], synergy_score=df$synergy_score[1:4000], gain_score=df$gain_score[1:4000], neuro=df$neuro_dom[1:4000], know=df$know_dom[1:4000], agree=df$agree_dom[1:4000], crit=df$crit_dom[1:4000], talk=df$talk_dom[1:4000], diversity=df$diversity_level[1:4000], rounds=df$n_steps[1:4000]), basic = FALSE, norm = TRUE, p=0.95), digits = 5)
+```
+The Shapiro-Wilk test (normtest.W) results in a p-value of <0.05 for all parameters, and we can consider that all the distributions are normal.
+
+### Correlation Plot
+```{r}
+df_cor <- df %>%
+  mutate('Discussion Rounds'=n_steps,
+         'Gain Score' = gain_score,
+         'Diversity Level' =diversity_level_num,
+         'Agreableness'=agree_dom_0,
+         'Critical Thinking'= crit_dom_0,
+         'Talkativeness'= talk_dom_0,
+         'Neuroticism'= neuro_dom_0,
+         'Knowledge'= know_dom_0)%>%
+    select('Discussion Rounds', 'Gain Score', 'Diversity Level', 'Agreableness', 'Critical Thinking', 'Talkativeness', 'Neuroticism', 'Knowledge')%>%
+  cor()
+
+df_cor_cir <- df_cor%>%
+  cor()%>%
+  corrplot(method="circle", number.cex=0.6)
+
+df_cor_cir
+ggsave("df_cor_cir.png", width = 20, height = 10, bg = 'white')
+  
+df_cor_num <- df_cor%>%
+  corrplot(method="number", number.cex=0.6)
+df_cor_num
+ggsave("df_cor_num.png", width = 20, height = 10, bg = 'white')
+
+df_cor_num
+
+
+df_cor <- round(df_cor,2)
+
+data.frame(df_cor)
+
+```
+
+
+```{r}
+m1 <- lm(gain_score~diversity_level_num, df)
+summary(m1, digits = 2)
+
+m2 <- lm(n_steps~diversity_level_num, df)
+summary(m2, digits = 2)
+
+
+
+m3 <- lm(gain_score~lists_str, df)
+summary(m3, digits = 2)
+
+m4 <- lm(gain_score~agree_dom_std+talk_dom_std+crit_dom_std+neuro_dom_std+know_dom_std, df)
+summary(m4, digits = 2)
+
+m5 <- lm(gain_score~agree_dom_std*talk_dom_std*crit_dom_std*neuro_dom_std*know_dom_std, df)
+summary(m5, digits = 2)
+
+m6 <- lm(gain_score~agree_dom_std*talk_dom_std*neuro_dom_std + crit_dom_std+know_dom_std, df)
+summary(m6, digits = 2)
+
+
+
+m7 <- lm(n_steps~lists_str, df)
+summary(m7, digits = 2)
+
+m8 <- lm(n_steps~agree_dom_std+talk_dom_std+crit_dom_std+neuro_dom_std+know_dom_std, df)
+summary(m8, digits = 2)
+
+m9 <- lm(n_steps~agree_dom_std*talk_dom_std*crit_dom_std*neuro_dom_std*know_dom_std, df)
+summary(m9, digits = 2)
+
+m10 <- lm(n_steps~agree_dom_std*talk_dom_std*neuro_dom_std + crit_dom_std+know_dom_std, df)
+summary(m10, digits = 2)
+
+m11 <- lm(n_steps~agree_dom_std*crit_dom_std*know_dom_std+talk_dom_std+neuro_dom_std, df)
+summary(m11)
 ```
 
 ```{r}
-## consensus model ## 
-consensus_model <- lm(avg_consensus ~ diversity, data = relevel_group)
-summary(consensus_model)
+AIC(m3, m4, m5, m6)
+MuMIn::r.squaredGLMM(m3)
+MuMIn::r.squaredGLMM(m4)
+MuMIn::r.squaredGLMM(m5)
+MuMIn::r.squaredGLMM(m6)
+```
+```{r}
+AIC(m7, m8, m9, m10, m11)
+MuMIn::r.squaredGLMM(m7)
+MuMIn::r.squaredGLMM(m8)
+MuMIn::r.squaredGLMM(m9)
+MuMIn::r.squaredGLMM(m10)
+MuMIn::r.squaredGLMM(m11)
+```
+
+
+For that purpose, I use the command AIC() to get the information
+criteria values for the separate models.
+
+The three best models (lowest AIC) are as follows:
+
+1.  angle ~ recipe + temperature+ (1|replicate), AIC=1676.49
+2.  angle \~ temperature + (1\|replicate), AIC=1678.46
+3.  angle \~ temperature + (1\|replicate)+(1\|recipe), AIC=1678.75
+
+To see how much variation of the dependent variable that is explained by the
+independent variable(s), I check the R-squared values. As the conditional R squared values are associated with both fixed effects and
+random effects, the conditional R squared values are the ones I'm
+interested in.
+
+Of the three best fitted models mentioned, the same model as mentioned above:
+
+angle ~ recipe + temperature+ (1|replicate)
+
+also has the best r squared value (R2c=0.67). 
+
+It is found that both fixed effects (recipe and temperature), and all levels within, significantly contribute to the model (p < 0.05). 
+
+Lastly, the model is compared with the null model in order to determine if it's unnecessary complex. The models compared will be:
+
+- angle ~ recipe + temperature+ (1|replicate) (Current best fitting model)
+- angle ~ (1|replicate) (null model)
+
+```{r}
+m_simpel <- lm(gain_score ~ 1, data = df) 
+anova(m6,m4)
+
+?AIC
+m_simpel
+m4
+?anova
+```
+
+```{r}
+
+```
+When comparing the maximal model with the null model, the maximal model is found to have best AIC score (AIC=1676.49) as well as being significantly better at predicting the angle than the null model (p close to 0). It is thereby finally concluded to be the best fitting model for describing the cake data.
+
+The model:
+
+angle ~ recipe + temperature+ (1|replicate)
+
+is on behalf of both AIC score (1676.49), conditional R squared value (0.67), and the significance level of the fixed effects (p < 0.05) concluded to be the maximal model in regards to predicting the angle of cake breakage. 
+
+For the analysis, the R (R Core Team, 2022) and lmerTest (Kuznetsova,
+Brockhoff and Christensen, 2017) was used to perform a linear mixed
+effects analysis of the relationship between the dependent variable
+"angle" and the independent variables "recipe" and "temperature". "Recipe" and "temperature" are fixed effects, whereas the variable, replicate, is included as random intercepts as it is a repeated measure. Therefore, the below linear mixed model was constructed:
+
+Eq. 1: lme4::lmer(Angle ~ Recipe + Temperature + (1|Replicate)), R studio v.1.9
+
+Intercepts were modeled as random effects because it can be assumed the
+intercept would be different depending on the random variables recipe and temperature.
+
+The final model outperformed the null model in regards to AIC score as mentionned above. As shown in the model
+summary, the model indicated that both independant varibales, temperature and recipe, significantly influenced the dependant variable.
+
+Fixed and random effects together accounted for roughly 67% of variance in
+the angle variable. Visual inspection of residual plots did not reveal
+any obvious deviations from homoscedasticity or linearity. The angle of
+breakage has been found to significantly be predicted by temperature as well as the type of recipe used, beta = -1.48, SE = 0.71, t = -2.10, p \< .05 (recipe B), and beta = -1.52, SE = 0.71, t = -2.16, p \< .05 (recipe C).
+
+One could argue that the replicate factor is nested within the recipe factor, which is also why models with this aspect was inspected. However, on behalf of the analysis, it seems that the model mentioned above, which is without this aspect, describes the data better.
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r }
+m1 <- lm(gain_score ~ agree_dom_std+talk_dom_std+crit_dom_std+ neuro_dom_std+ know_dom_std, data=df)
+summary(m1, digits = 2)
+
+agree_gain <- ggplot(df, aes(agree_dom_std, gain_score)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[2]),
+    color = "red") +
+  labs(x = "Agree", y = "Gain_score", title = "Gain score and Agreeableness")
+agree_gain
+ggsave("agree_gain.png", width = 5, height = 3.5, bg = 'white')
+
+
+talk_gain <- ggplot(df, aes(talk_dom_std, gain_score)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[3]),
+    color = "red") +
+  labs(x = "Talk", y = "Gain_score", title = "Gain score and Talkativeness")
+talk_gain
+ggsave("talk_gain.png", width = 5, height = 3.5, bg = 'white')
+
+crit_gain <- ggplot(df, aes(crit_dom_std, gain_score)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[4]),
+    color = "red") +
+  labs(x = "Critical", y = "Gain_score", title = "Gain score and Critical Thinking")
+crit_gain
+ggsave("crit_gain.png", width = 5, height = 3.5, bg = 'white')
+
+neuro_gain <- ggplot(df, aes(neuro_dom_std, gain_score)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[5]),
+    color = "red") +
+  labs(x = "Neuroticism", y = "Gain_score", title = "Gain score and Neuroticism")
+neuro_gain
+ggsave("neuro_gain.png", width = 5, height = 3.5, bg = 'white')
+
+know_gain <- ggplot(df, aes(know_dom_std, gain_score)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m1)[1],
+    slope = sum(coef(m1)[6]),
+    color = "red") +
+  labs(x = "Knowledge", y = "Gain_score", , title = "Gain score and Knowledge")
+know_gain
+ggsave("know_gain.png", width = 5, height = 3.5, bg = 'white')
+
+
+#plot_grid(b1, b2, b3, b4, b5, ncol=2)
+```
+```{r}
+m2 <- lm(n_steps ~ agree_dom_std+talk_dom_std+crit_dom_std+ neuro_dom_std+ know_dom_std, data=df)
+summary(m2, digits = 2)
+
+agree_steps <- ggplot(df, aes(agree_dom_std, n_steps)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m2)[1],
+    slope = sum(coef(m2)[2]),
+    color = "red") +
+  labs(x = "Agree", y = "steps", title = "Number of Steps and Agreeableness")
+agree_steps
+ggsave("agree_steps.png", width = 5, height = 3.5, bg = 'white')
+
+
+talk_steps <- ggplot(df, aes(talk_dom_std, n_steps)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m2)[1],
+    slope = sum(coef(m2)[3]),
+    color = "red") +
+  labs(x = "Talk", y = "steps", title = "Number of Steps and Talkativeness")
+talk_steps
+ggsave("talk_steps.png", width = 5, height = 3.5, bg = 'white')
+
+crit_steps <- ggplot(df, aes(crit_dom_std, n_steps)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m2)[1],
+    slope = sum(coef(m2)[4]),
+    color = "red") +
+  labs(x = "Critical", y = "steps", title = "Number of Steps and Critical Thinking")
+crit_steps
+ggsave("crit_steps.png", width = 5, height = 3.5, bg = 'white')
+
+neuro_steps <- ggplot(df, aes(neuro_dom_std, n_steps)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m2)[1],
+    slope = sum(coef(m2)[5]),
+    color = "red") +
+  labs(x = "Neuroticism", y = "steps", title = "Number of Steps and Neuroticism")
+neuro_steps
+ggsave("neuro_steps.png", width = 5, height = 3.5, bg = 'white')
+
+know_steps <- ggplot(df, aes(know_dom_std, n_steps)) +
+  geom_point() +
+  geom_abline(
+    intercept = coef(m2)[1],
+    slope = sum(coef(m2)[6]),
+    color = "red") +
+  labs(x = "Knowledge", y = "steps", title = "Number of Steps and Knowledge")
+know_steps
+ggsave("know_steps.png", width = 5, height = 3.5, bg = 'white')
+```
+
+
+```{r}
+# Residual versus fitted values plot
+plot(fitted(m1),resid(m1))
+abline(0,0)
+```
+From this plot we see that the residual vs fitted values are equally distributed.
+
+
+### A task for inspecting specific situations
+```{r}
+### a) Instructor A is a 50-year-old woman who is a native English speaker and has a beauty score of -1. Instructor B is a 60-year-old man who is a native English speaker and has a beauty score of -0.5. Simulate 1000 random draws of the course evaluation rating of these two instructors. In your simulation, use posterior_predict to account for the uncertainty in the regression parameters as well as predictive uncertainty. (Lelia & Anne)
+
+m2 <- stan_glm(gain_score ~ agree_dom_0+talk_dom_0+crit_dom_0+ neuro_dom_0+ know_dom_0, data=df, refresh = 0)
+summary(m2, digits = 5)
+
+# Creating a data frame with the informations regarding the two people
+df_1 <- df%>%
+  select(gain_score, agree_dom_0, talk_dom_0,crit_dom_0,neuro_dom_0, know_dom_0)%>%
+  filter(agree_dom_0>2, crit_dom_0>0.1)
+
+# Creating another data frame where the information is used to simulate a 
+# posterior prediction with 1000 draws of the evaluation score for each of the 
+# instructors
+pred1 <- as.data.frame(posterior_predict(m2, newdata=df_1))
+
+pred1 <- dplyr::filter(pred1, row_number()<1001)
+
+head(pred1)
+
+### b) Make a histogram of the difference between the course evaluations for A and B. What is the probability that A will have a higher evaluation? (Mads)
+
+#Calculating the difference between the course evaluations for A and B
+pred1$difference <- pred1$'1'-pred1$'2'
+
+# Creating a histogram of the differences between the course evaluations for A 
+#and B
+ggplot(pred1, aes(difference))+
+geom_histogram(aes(y=..density..), colour = "black", fill = "aliceblue", binwidth=  0.05)+
+  theme_minimal()+
+  stat_function(fun=dnorm,args=list(mean=mean(pred1$difference),sd = sd(pred1$difference)),colour = "red", size =1)+
+  geom_vline(xintercept = 0, color="Blue", size = 1) +
+  ggtitle("Histogram for difference") 
+
+
+# Creating a function filtering out all the times A's evaluation is higher than 
+#B's
+a <- length(Filter(function(diff) { 
+    diff > 0 }, 
+    pred1$difference))  # Calculating the percentage the weight exeeds the limit 
+    
+# Calculating the percentage
+a/1000
+
+There's a ~45% chance that A will have a higher evaluation scores than B.
 ```
